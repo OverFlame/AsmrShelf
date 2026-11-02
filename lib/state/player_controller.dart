@@ -542,6 +542,24 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 用最新的曲目对象替换队列里的同 id/同路径项。
+  ///
+  /// 字幕、封面等元数据只存在于 [TrackItem] 上；播放队列持有的是开始播放
+  /// 时的旧对象，换字幕/清字幕时要同步替换，常驻字幕与字幕页才能立刻拿到
+  /// 新的 `subtitlePath`。
+  void replaceTrack(TrackItem track) {
+    var changed = false;
+    for (var i = 0; i < _queue.length; i++) {
+      final old = _queue[i];
+      final sameId = track.id != null && old.id == track.id;
+      if (sameId || old.path == track.path) {
+        _queue[i] = track;
+        changed = true;
+      }
+    }
+    if (changed) notifyListeners();
+  }
+
   /// 从队列移除第 [i] 首。移除的是当前曲目时接着播放下一个。
   Future<void> removeAt(int i) async {
     if (i < 0 || i >= _queue.length) return;

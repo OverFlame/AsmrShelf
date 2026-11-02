@@ -39,6 +39,8 @@ import 'settings_state.dart';
 import 'tag_state.dart';
 
 export 'tag_filter.dart';
+import '../services/subtitle_overlay_bridge.dart';
+import '../services/subtitle_overlay_controller.dart';
 import '../services/subtitle_parser.dart';
 import '../services/subtitle_service.dart';
 import '../services/thumbnail_cache.dart';
@@ -388,6 +390,13 @@ class AppState extends ChangeNotifier {
       downloader: dlsiteCoverDownloader,
       onRefresh: refresh,
     )..addListener(notifyListeners);
+    subtitleOverlay = SubtitleOverlayController(
+      player: player,
+      subtitleFor: subtitleFor,
+      bridge: MethodChannelSubtitleOverlayBridge(),
+      persistEnabled: settings.setSubtitleOverlayEnabled,
+      persistLocked: settings.setSubtitleOverlayLocked,
+    )..addListener(notifyListeners);
     // 播放状态持有队列命令、播放历史、选段与续播位置；队列在 player 里，
     // 它只决定「播哪些、从哪首开始、播完写回什么」。
     playback = PlaybackState(
@@ -432,6 +441,9 @@ class AppState extends ChangeNotifier {
   /// DLsite 元数据状态：编号解析、抓取、预览与应用。
   late final DlsiteState dlsite;
 
+  /// 系统级常驻字幕：只把当前/下一句推给原生窗口。
+  late final SubtitleOverlayController subtitleOverlay;
+
   Future<void> init() async {
     logInfo('AppState', 'Initializing...');
     // 缩略图服务必须在这里初始化：界面一建卡片就会调 thumbPath()，
@@ -470,6 +482,10 @@ class AppState extends ChangeNotifier {
     _loadingSettings = true;
     try {
       settings.load(ss);
+      await subtitleOverlay.configure(
+        enabled: settings.subtitleOverlayEnabled,
+        locked: settings.subtitleOverlayLocked,
+      );
       player.setRepeatMode(_repeatModeFromName(ss.repeatModeName));
       player.setShuffle(ss.shuffle);
       await player.setSpeed(ss.playSpeed);
@@ -574,6 +590,22 @@ class AppState extends ChangeNotifier {
     await settings.setSubtitleResumeSeconds(seconds);
     notifyListeners();
   }
+
+  /// 当前字幕是否已放到系统级常驻窗口。
+  bool get subtitleOverlayEnabled => subtitleOverlay.enabled;
+
+  /// 常驻字幕是否锁定（鼠标/触摸穿透）。
+  bool get subtitleOverlayLocked => subtitleOverlay.locked;
+
+  /// 最近一次开启常驻字幕失败的原因。
+  String? get subtitleOverlayError => subtitleOverlay.error;
+
+  /// 开启/关闭常驻字幕。失败时返回 false，原因见 [subtitleOverlayError]。
+  Future<bool> setSubtitleOverlayEnabled(bool enabled) =>
+      subtitleOverlay.setEnabled(enabled);
+
+  Future<void> setSubtitleOverlayLocked(bool locked) =>
+      subtitleOverlay.setLocked(locked);
 
   Future<void> setViewMode(String mode) async {
     await settings.setViewMode(mode);
@@ -783,6 +815,7 @@ class AppState extends ChangeNotifier {
     await dlsite.prefetch(workId);
     library.setCurrentWork(await _workDao.getById(workId) ?? work);
     await refresh();
+    subtitleOverlay.refresh();
   }
 
   /// 一次性导入的旧数据兼容：根文件夹存在、却没有子文件夹，但根目录下确实
@@ -2508,20 +2541,34 @@ class AppState extends ChangeNotifier {
   Future<void> replaceSubtitle(int trackId, String newPath) async {
     await _trackDao.setSubtitlePath(trackId, newPath);
     _subtitleCache.clear();
-    // 更新内存中的曲目
-    library.tracks = library.tracks
-        .map((t) => t.id == trackId ? t.copyWith(subtitlePath: newPath) : t)
-        .toList();
+    _applySubtitlePath(trackId, newPath);
+    subtitleOverlay.refresh();
     notifyListeners();
   }
 
   Future<void> clearSubtitle(int trackId) async {
     await _trackDao.setSubtitlePath(trackId, null);
     _subtitleCache.clear();
-    library.tracks = library.tracks
-        .map((t) => t.id == trackId ? t.copyWith(subtitlePath: null) : t)
-        .toList();
+    _applySubtitlePath(trackId, null);
+    subtitleOverlay.refresh();
     notifyListeners();
+  }
+
+  /// 同步更新中间栏曲目与播放器队列里的同一个 TrackItem。
+  ///
+  /// 常驻字幕和字幕页都读 `player.currentTrack`；只改 `library.tracks`
+  /// 时，播放中的字幕路径会一直是旧的，必须把队列里的对象也换掉。
+  void _applySubtitlePath(int trackId, String? path) {
+    final updated = library.tracks
+        .map((t) => t.id == trackId ? t.copyWith(subtitlePath: path) : t)
+        .toList();
+    library.tracks = updated;
+    for (final track in updated) {
+      if (track.id == trackId) {
+        player.replaceTrack(track);
+        break;
+      }
+    }
   }
 
   // ═══════════════ 媒体行自己的缩略图 ═══════════════

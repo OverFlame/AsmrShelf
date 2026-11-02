@@ -493,6 +493,24 @@ class SettingsService {
     await _save();
   }
 
+  /// 是否把当前字幕放到系统级常驻窗口（桌面歌词 / Android 悬浮字幕）。
+  bool get subtitleOverlayEnabled =>
+      (_data['subtitle_overlay_enabled'] as bool?) ?? false;
+
+  Future<void> setSubtitleOverlayEnabled(bool enabled) async {
+    _data['subtitle_overlay_enabled'] = enabled;
+    await _save();
+  }
+
+  /// 常驻字幕是否锁定（鼠标/触摸穿透，避免挡住下面的窗口）。
+  bool get subtitleOverlayLocked =>
+      (_data['subtitle_overlay_locked'] as bool?) ?? false;
+
+  Future<void> setSubtitleOverlayLocked(bool locked) async {
+    _data['subtitle_overlay_locked'] = locked;
+    await _save();
+  }
+
   static const int minSubtitleResumeSeconds = 2;
   static const int maxSubtitleResumeSeconds = 60;
   static const int defaultSubtitleResumeSeconds = 8;

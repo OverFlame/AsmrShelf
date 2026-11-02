@@ -63,6 +63,16 @@ class SettingsState extends ChangeNotifier {
   /// 滑动之后留在原地的秒数。
   int get subtitleResumeSeconds => _subtitleResumeSeconds;
 
+  bool _subtitleOverlayEnabled = false;
+
+  /// 当前字幕是否显示在系统级常驻窗口。
+  bool get subtitleOverlayEnabled => _subtitleOverlayEnabled;
+
+  bool _subtitleOverlayLocked = false;
+
+  /// 常驻字幕是否锁定（鼠标/触摸穿透）。
+  bool get subtitleOverlayLocked => _subtitleOverlayLocked;
+
   String _dlsiteProxy = '';
 
   /// 抓 DLsite 用的 HTTP 代理，空串表示直连。
@@ -84,6 +94,8 @@ class SettingsState extends ChangeNotifier {
     _subtitleOpacityAuto = ss.subtitleOpacityAuto;
     _subtitleInactiveOpacity = ss.subtitleInactiveOpacity;
     _subtitleResumeSeconds = ss.subtitleResumeSeconds;
+    _subtitleOverlayEnabled = ss.subtitleOverlayEnabled;
+    _subtitleOverlayLocked = ss.subtitleOverlayLocked;
     _dlsiteProxy = ss.dlsiteProxy;
     notifyListeners();
   }
@@ -178,6 +190,18 @@ class SettingsState extends ChangeNotifier {
         SettingsService.maxSubtitleResumeSeconds);
     await SettingsService.instance
         .setSubtitleResumeSeconds(_subtitleResumeSeconds);
+    notifyListeners();
+  }
+
+  Future<void> setSubtitleOverlayEnabled(bool enabled) async {
+    _subtitleOverlayEnabled = enabled;
+    await SettingsService.instance.setSubtitleOverlayEnabled(enabled);
+    notifyListeners();
+  }
+
+  Future<void> setSubtitleOverlayLocked(bool locked) async {
+    _subtitleOverlayLocked = locked;
+    await SettingsService.instance.setSubtitleOverlayLocked(locked);
     notifyListeners();
   }
 

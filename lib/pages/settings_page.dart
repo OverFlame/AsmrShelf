@@ -33,6 +33,49 @@ class SettingsPage extends StatelessWidget {
           const _SectionHeader('字幕'),
           _subtitleOpacityTile(context, appState),
           _subtitleResumeTile(context, appState),
+          SwitchListTile(
+            key: const ValueKey('subtitle-overlay-enabled'),
+            secondary: const Icon(Icons.picture_in_picture_alt_outlined,
+                size: 18),
+            title: const Text('常驻字幕'),
+            subtitle: Text(
+              appState.subtitleOverlayError ??
+                  '把当前两句显示在应用窗口外；Windows 置顶悬浮，Android 需要「显示在其他应用上层」权限。',
+              style: TextStyle(
+                fontSize: 11,
+                color: appState.subtitleOverlayError != null
+                    ? Theme.of(context).colorScheme.error
+                    : AppColors.textSecondaryOf(context),
+              ),
+            ),
+            value: appState.subtitleOverlayEnabled,
+            onChanged: (v) async {
+              final ok = await appState.setSubtitleOverlayEnabled(v);
+              if (!ok &&
+                  appState.subtitleOverlayError != null &&
+                  context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(appState.subtitleOverlayError!)),
+                );
+              }
+            },
+          ),
+          SwitchListTile(
+            key: const ValueKey('subtitle-overlay-locked'),
+            secondary: const Icon(Icons.lock_outline, size: 18),
+            title: const Text('锁定字幕窗口'),
+            subtitle: Text(
+              '鼠标/触摸穿透，避免挡住下面的窗口；关闭后可拖动字幕窗。',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            value: appState.subtitleOverlayLocked,
+            onChanged: appState.subtitleOverlayEnabled
+                ? (v) => appState.setSubtitleOverlayLocked(v)
+                : null,
+          ),
           const Divider(height: 1),
 
           // ── 图片网格 ──

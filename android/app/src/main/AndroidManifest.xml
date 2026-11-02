@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 常驻字幕：把歌词画在其他应用上层 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:label="AsmrShelf"
@@ -47,6 +49,10 @@
             android:name=".PlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+        <!-- 常驻字幕浮窗；只由本应用启动，不导出 -->
+        <service
+            android:name=".SubtitleOverlayService"
+            android:exported="false" />
         <!-- 外链播放：别的应用只能通过 FileProvider 的 content:// 读我们的文件，
              file:// URI 在 Android 7 起会抛 FileUriExposedException。 -->
         <provider

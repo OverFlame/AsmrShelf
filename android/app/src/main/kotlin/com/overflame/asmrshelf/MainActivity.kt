@@ -18,9 +18,11 @@ import java.io.File
 class MainActivity : FlutterActivity() {
 
     private val channelName = "asmrshelf/playback"
+    private val overlayChannelName = "asmrshelf/subtitle_overlay"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        registerOverlayChannel(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         PlaybackService.channel = channel
 
@@ -86,6 +88,84 @@ class MainActivity : FlutterActivity() {
                 }
 
                 else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun registerOverlayChannel(flutterEngine: FlutterEngine) {
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            overlayChannelName,
+        )
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hasPermission" -> result.success(hasOverlayPermission())
+
+                "requestPermission" -> {
+                    if (!hasOverlayPermission()) openOverlaySettings()
+                    result.success(hasOverlayPermission())
+                }
+
+                "show" -> {
+                    if (!hasOverlayPermission()) {
+                        result.success(false)
+                    } else {
+                        val args = call.arguments as? Map<*, *>
+                        SubtitleOverlayService.show(
+                            this,
+                            args?.get("current") as? String ?: "",
+                            args?.get("next") as? String ?: "",
+                            args?.get("locked") as? Boolean ?: false,
+                        )
+                        result.success(true)
+                    }
+                }
+
+                "update" -> {
+                    val args = call.arguments as? Map<*, *>
+                    SubtitleOverlayService.update(
+                        this,
+                        args?.get("current") as? String ?: "",
+                        args?.get("next") as? String ?: "",
+                    )
+                    result.success(null)
+                }
+
+                "hide" -> {
+                    SubtitleOverlayService.hide(this)
+                    result.success(null)
+                }
+
+                "setLocked" -> {
+                    SubtitleOverlayService.setLocked(
+                        this,
+                        call.arguments as? Boolean ?: false,
+                    )
+                    result.success(null)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun hasOverlayPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return Settings.canDrawOverlays(this)
+    }
+
+    private fun openOverlaySettings() {
+        try {
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                )
+            )
+        } catch (_: Exception) {
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+            } catch (_: Exception) {
             }
         }
     }

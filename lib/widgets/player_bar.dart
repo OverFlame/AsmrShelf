@@ -200,6 +200,22 @@ class PlayerBar extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (isWide)
+                    IconButton(
+                      key: const ValueKey('player-subtitle-overlay'),
+                      icon: Icon(
+                        appState.subtitleOverlayEnabled
+                            ? Icons.picture_in_picture_alt
+                            : Icons.picture_in_picture_alt_outlined,
+                        size: 18,
+                        color: appState.subtitleOverlayEnabled
+                            ? AppColors.accent
+                            : AppColors.mutedLightOf(context),
+                      ),
+                      tooltip:
+                          appState.subtitleOverlayEnabled ? '关闭常驻字幕' : '开启常驻字幕',
+                      onPressed: () => _toggleOverlay(context, appState),
+                    ),
                   IconButton(
                     icon: const Icon(Icons.subtitles_outlined,
                         size: 20, color: AppColors.teal),
@@ -215,6 +231,16 @@ class PlayerBar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _toggleOverlay(BuildContext context, AppState appState) async {
+    final ok = await appState
+        .setSubtitleOverlayEnabled(!appState.subtitleOverlayEnabled);
+    if (!ok && appState.subtitleOverlayError != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(appState.subtitleOverlayError!)),
+      );
+    }
   }
 
   IconData _volumeIcon(double v) {

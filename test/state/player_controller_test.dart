@@ -109,6 +109,17 @@ void main() {
   });
 
   group('队列编辑（第 24.1 项）', () {
+    test('replaceTrack 同步当前队列项的字幕路径', () {
+      final player = PlayerController();
+      player.debugSeedQueue([item(1), item(2)], startIndex: 1);
+      final updated = player.currentTrack!.copyWith(subtitlePath: '/m/a2.lrc');
+
+      player.replaceTrack(updated);
+
+      expect(player.currentTrack!.subtitlePath, '/m/a2.lrc');
+      expect(player.queue.first.subtitlePath, isNull);
+    });
+
     test('playNext 插到当前曲目之后', () async {
       final player = PlayerController();
       player.debugSeedQueue([item(1), item(2), item(3)], startIndex: 1);

@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../db/track_dao.dart';
 import '../services/subtitle_parser.dart';
 import '../services/subtitle_style.dart';
+import '../services/subtitle_timing.dart';
 import '../state/app_state.dart';
 import '../state/player_controller.dart';
 import '../theme/app_theme.dart';
@@ -59,7 +60,8 @@ class _SubtitlePageState extends State<SubtitlePage> {
         : appState.subtitleInactiveOpacity;
 
     // 无时间标签的歌词（纯文本 LRC）不做逐行同步，整篇静态显示。
-    final currentIndex = doc.hasTiming ? _currentIndex(lines, player.position) : -1;
+    final currentIndex =
+        doc.hasTiming ? subtitleLineIndex(lines, player.position) : -1;
 
     // 自动滚动到当前行
     if (currentIndex != _lastIndex && currentIndex >= 0 && !_userScrolling) {
@@ -77,7 +79,7 @@ class _SubtitlePageState extends State<SubtitlePage> {
           SafeArea(
             child: Column(
               children: [
-                _topBar(context, track),
+                _topBar(context, track, appState),
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
@@ -125,7 +127,7 @@ class _SubtitlePageState extends State<SubtitlePage> {
     );
   }
 
-  Widget _topBar(BuildContext context, TrackItem? track) {
+  Widget _topBar(BuildContext context, TrackItem? track, AppState appState) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
@@ -159,6 +161,29 @@ class _SubtitlePageState extends State<SubtitlePage> {
                   ),
               ],
             ),
+          ),
+          IconButton(
+            key: const ValueKey('subtitle-overlay-button'),
+            tooltip: appState.subtitleOverlayEnabled ? '关闭常驻字幕' : '开启常驻字幕',
+            icon: Icon(
+              appState.subtitleOverlayEnabled
+                  ? Icons.picture_in_picture_alt
+                  : Icons.picture_in_picture_alt_outlined,
+              color: appState.subtitleOverlayEnabled
+                  ? AppColors.accent
+                  : Colors.white70,
+            ),
+            onPressed: () async {
+              final ok = await appState
+                  .setSubtitleOverlayEnabled(!appState.subtitleOverlayEnabled);
+              if (!ok &&
+                  appState.subtitleOverlayError != null &&
+                  context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(appState.subtitleOverlayError!)),
+                );
+              }
+            },
           ),
         ],
       ),
@@ -356,19 +381,6 @@ class _SubtitlePageState extends State<SubtitlePage> {
         ],
       ),
     );
-  }
-
-  int _currentIndex(List<LyricLine> lines, Duration pos) {
-    final ms = pos.inMilliseconds;
-    int idx = -1;
-    for (int i = 0; i < lines.length; i++) {
-      if (ms >= lines[i].startMs) {
-        idx = i;
-      } else {
-        break;
-      }
-    }
-    return idx;
   }
 
   void _scrollTo(int index) {
