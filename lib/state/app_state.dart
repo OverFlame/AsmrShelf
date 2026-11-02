@@ -27,8 +27,8 @@ import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
+import 'settings_state.dart';
 import '../services/subtitle_parser.dart';
-import '../services/subtitle_style.dart';
 import '../services/subtitle_service.dart';
 import '../services/thumbnail_cache.dart';
 import '../services/video_launcher.dart';
@@ -129,41 +129,29 @@ class AppState extends ChangeNotifier {
 
 
   // ── 图片视图设置 ──
-  int _gridColumns = 4;
-  int get gridColumns => _gridColumns;
+  int get gridColumns => settings.gridColumns;
 
   // ── 界面布局 ──
-  double _leftWidth = SettingsService.defaultLeftWidth;
-
   /// 宽屏左栏宽度。界面层还会按窗口宽度再夹一次，这里只保证落在设置允许的范围内。
-  double get leftWidth => _leftWidth;
-
-  double _libraryHeight = SettingsService.defaultLibraryHeight;
+  double get leftWidth => settings.leftWidth;
 
   /// 左栏里作品集列表的高度。标签区占剩余空间。
-  double get libraryHeight => _libraryHeight;
+  double get libraryHeight => settings.libraryHeight;
 
   /// 缩略图缓存上限（MB）。复用封面缓存设置键，见 [setCacheSizeMB]。
   int get cacheSizeMB => _coverCacheLimitMB;
 
-  String _viewMode = 'grid';
-  String get viewMode => _viewMode;
+  String get viewMode => settings.viewMode;
 
   // ── 字幕页外观 ──
-  bool _subtitleOpacityAuto = true;
-
   /// 非当前句的透明度是否按封面明暗自动算。
-  bool get subtitleOpacityAuto => _subtitleOpacityAuto;
-
-  double _subtitleInactiveOpacity = SubtitleStyle.defaultInactiveOpacity;
+  bool get subtitleOpacityAuto => settings.subtitleOpacityAuto;
 
   /// 固定模式下非当前句的透明度。
-  double get subtitleInactiveOpacity => _subtitleInactiveOpacity;
-
-  int _subtitleResumeSeconds = SettingsService.defaultSubtitleResumeSeconds;
+  double get subtitleInactiveOpacity => settings.subtitleInactiveOpacity;
 
   /// 滑动之后留在原地的秒数。
-  int get subtitleResumeSeconds => _subtitleResumeSeconds;
+  int get subtitleResumeSeconds => settings.subtitleResumeSeconds;
 
   /// 缩略图缓存世代。清空缓存时自增，图片卡片据此重新生成缩略图。
   int _thumbEpoch = 0;
@@ -223,12 +211,13 @@ class AppState extends ChangeNotifier {
   List<MediaSegment> get segments => List.unmodifiable(_segments);
 
   // ── 设置 ──
-  ThemeMode _themeMode = ThemeMode.dark;
-  ThemeMode get themeMode => _themeMode;
-  String _sortKey = 'filename';
-  String get sortKey => _sortKey;
-  bool _sortDescending = false;
-  bool get sortDescending => _sortDescending;
+
+  /// 界面设置的持有者。排序、主题、列数、布局尺寸与字幕外观都在这里。
+  final SettingsState settings = SettingsState();
+
+  ThemeMode get themeMode => settings.themeMode;
+  String get sortKey => settings.sortKey;
+  bool get sortDescending => settings.sortDescending;
 
   // ── 图片 / 视频库排序 ──
   //
@@ -243,14 +232,11 @@ class AppState extends ChangeNotifier {
     'added': '加入时间',
   };
 
-  String _imageSortKey = 'name';
-  bool _imageSortDesc = false;
-
   /// 多媒体库的排序字段。图片与视频合并成一个库之后只剩这一套设置。
-  String get visualSortKey => _imageSortKey;
+  String get visualSortKey => settings.visualSortKey;
 
   /// 多媒体库是否降序。
-  bool get visualSortDescending => _imageSortDesc;
+  bool get visualSortDescending => settings.visualSortDescending;
 
   /// 作品层可用的排序字段。作品没有文件大小与修改时间，只留名称与加入时间。
   static const Map<String, String> worksSortLabels = {
@@ -259,24 +245,20 @@ class AppState extends ChangeNotifier {
   };
 
   /// 作品层排序独立于文件层：默认按加入时间倒序，与列表原有的「新作品在前」一致。
-  String _worksSortKey = 'added';
-  bool _worksSortDesc = true;
+  String get worksSortKey => worksSortLabels.containsKey(settings.worksSortKey)
+      ? settings.worksSortKey
+      : 'added';
 
-  String get worksSortKey =>
-      worksSortLabels.containsKey(_worksSortKey) ? _worksSortKey : 'added';
-
-  bool get worksSortDescending => _worksSortDesc;
+  bool get worksSortDescending => settings.worksSortDescending;
 
   Future<void> setWorksSortKey(String key) async {
     if (!worksSortLabels.containsKey(key)) return;
-    _worksSortKey = key;
-    await SettingsService.instance.setWorksSortKey(key);
+    await settings.setWorksSortKey(key);
     notifyListeners();
   }
 
   Future<void> setWorksSortDescending(bool desc) async {
-    _worksSortDesc = desc;
-    await SettingsService.instance.setWorksSortDescending(desc);
+    await settings.setWorksSortDescending(desc);
     notifyListeners();
   }
 
@@ -327,16 +309,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> setVisualSortKey(String key) async {
     if (!visualSortLabels.containsKey(key)) return;
-    final ss = SettingsService.instance;
-    _imageSortKey = key;
-    await ss.setImageSortKey(key);
+    await settings.setVisualSortKey(key);
     await _afterVisualSortChanged();
   }
 
   Future<void> setVisualSortDescending(bool desc) async {
-    final ss = SettingsService.instance;
-    _imageSortDesc = desc;
-    await ss.setImageSortDescending(desc);
+    await settings.setVisualSortDescending(desc);
     await _afterVisualSortChanged();
   }
 
@@ -481,20 +459,7 @@ class AppState extends ChangeNotifier {
     final ss = SettingsService.instance;
     _loadingSettings = true;
     try {
-      _themeMode = ss.themeMode;
-      _sortKey = ss.sortKey;
-      _sortDescending = ss.sortDescending;
-      _imageSortKey = ss.imageSortKey;
-      _imageSortDesc = ss.imageSortDescending;
-      _worksSortKey = ss.worksSortKey;
-      _worksSortDesc = ss.worksSortDescending;
-      _gridColumns = ss.gridColumns;
-      _leftWidth = ss.leftWidth;
-      _libraryHeight = ss.libraryHeight;
-      _viewMode = ss.viewMode;
-      _subtitleOpacityAuto = ss.subtitleOpacityAuto;
-      _subtitleInactiveOpacity = ss.subtitleInactiveOpacity;
-      _subtitleResumeSeconds = ss.subtitleResumeSeconds;
+      settings.load(ss);
       player.setRepeatMode(_repeatModeFromName(ss.repeatModeName));
       player.setShuffle(ss.shuffle);
       await player.setSpeed(ss.playSpeed);
@@ -540,53 +505,42 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
-    _themeMode = mode;
-    await SettingsService.instance.setThemeMode(mode);
+    await settings.setThemeMode(mode);
     notifyListeners();
   }
 
   Future<void> setSortKey(String key) async {
-    _sortKey = key;
-    await SettingsService.instance.setSortKey(key);
+    await settings.setSortKey(key);
     await refresh();
   }
 
   Future<void> setSortDescending(bool desc) async {
-    _sortDescending = desc;
-    await SettingsService.instance.setSortDescending(desc);
+    await settings.setSortDescending(desc);
     await refresh();
   }
 
   // ── 图片视图设置 ──
 
   Future<void> setGridColumns(int cols) async {
-    _gridColumns = cols.clamp(2, 10);
-    await SettingsService.instance.setGridColumns(_gridColumns);
+    await settings.setGridColumns(cols);
     notifyListeners();
   }
 
   // ── 界面布局 ──
 
   Future<void> setLeftWidth(double width) async {
-    _leftWidth = width.clamp(
-        SettingsService.minLeftWidth, SettingsService.maxLeftWidth);
-    await SettingsService.instance.setLeftWidth(_leftWidth);
+    await settings.setLeftWidth(width);
     notifyListeners();
   }
 
   Future<void> setLibraryHeight(double height) async {
-    _libraryHeight = height.clamp(
-        SettingsService.minLibraryHeight, SettingsService.maxLibraryHeight);
-    await SettingsService.instance.setLibraryHeight(_libraryHeight);
+    await settings.setLibraryHeight(height);
     notifyListeners();
   }
 
   /// 恢复默认布局。只动两个尺寸，不碰主题、列数、排序与筛选。
   Future<void> resetLayoutSizes() async {
-    _leftWidth = SettingsService.defaultLeftWidth;
-    _libraryHeight = SettingsService.defaultLibraryHeight;
-    await SettingsService.instance.setLeftWidth(_leftWidth);
-    await SettingsService.instance.setLibraryHeight(_libraryHeight);
+    await settings.resetLayoutSizes();
     notifyListeners();
   }
 
@@ -597,30 +551,22 @@ class AppState extends ChangeNotifier {
   // ── 字幕页外观 ──
 
   Future<void> setSubtitleOpacityAuto(bool auto) async {
-    _subtitleOpacityAuto = auto;
-    await SettingsService.instance.setSubtitleOpacityAuto(auto);
+    await settings.setSubtitleOpacityAuto(auto);
     notifyListeners();
   }
 
   Future<void> setSubtitleInactiveOpacity(double value) async {
-    _subtitleInactiveOpacity = SubtitleStyle.clampInactiveOpacity(value);
-    await SettingsService.instance
-        .setSubtitleInactiveOpacity(_subtitleInactiveOpacity);
+    await settings.setSubtitleInactiveOpacity(value);
     notifyListeners();
   }
 
   Future<void> setSubtitleResumeSeconds(int seconds) async {
-    _subtitleResumeSeconds = seconds.clamp(
-        SettingsService.minSubtitleResumeSeconds,
-        SettingsService.maxSubtitleResumeSeconds);
-    await SettingsService.instance
-        .setSubtitleResumeSeconds(_subtitleResumeSeconds);
+    await settings.setSubtitleResumeSeconds(seconds);
     notifyListeners();
   }
 
   Future<void> setViewMode(String mode) async {
-    _viewMode = mode == 'list' ? 'list' : 'grid';
-    await SettingsService.instance.setViewMode(_viewMode);
+    await settings.setViewMode(mode);
     notifyListeners();
   }
 
@@ -864,10 +810,10 @@ class AppState extends ChangeNotifier {
 
   List<TrackItem> _sortTracks(List<TrackItem> list) {
     final sorted = List<TrackItem>.from(list);
-    final dir = _sortDescending ? -1 : 1;
+    final dir = settings.sortDescending ? -1 : 1;
     sorted.sort((a, b) {
       int cmp;
-      switch (_sortKey) {
+      switch (settings.sortKey) {
         case 'title':
           cmp = a.displayTitle.toLowerCase().compareTo(b.displayTitle.toLowerCase());
           break;
