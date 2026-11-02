@@ -22,6 +22,7 @@ class DlsiteFetchResult {
     this.fromCache = false,
     this.message = '',
     this.grantedTags = 0,
+    this.missingCode = false,
   });
 
   final DlsiteWork? work;
@@ -31,6 +32,9 @@ class DlsiteFetchResult {
 
   /// 给用户看的说明，失败时非空。
   final String message;
+
+  /// 失败原因是「找不到 RJ 号」。界面据此给出填编号的入口，而不是只弹一句报错。
+  final bool missingCode;
 
   /// 这次新挂上的标签数。
   final int grantedTags;

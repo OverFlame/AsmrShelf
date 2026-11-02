@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common/sqlite_api.dart';
 
+import '../db/folder_dao.dart';
 import '../db/work_dao.dart';
 import '../db/work_metadata_dao.dart';
 import '../services/cover_service.dart';
@@ -55,21 +56,70 @@ class DlsiteState extends ChangeNotifier {
   /// 同步读已反解的完整信息；没预取或没抓过就是 null。
   DlsiteWork? workSync(int workId) => _works[workId];
 
-  /// 从目录名或已存的元数据里找 RJ 号。
+  /// 从已存的元数据、目录名或文件夹登记里找 RJ 号。
+  ///
+  /// 顺序按「越明确越优先」：手动填过或抓过的编号最可靠；其次是作品目录
+  /// 及其祖先目录（`RJ 号/本編/` 这种两层结构很常见）；再退到作品名和
+  /// `folder_paths` 里登记的路径。导入时没写 `works.root_path` 的作品也能
+  /// 靠后两级找到编号。
   Future<String?> codeOf(int workId) async {
+    final meta = await WorkMetadataDao(db()).getByWork(workId);
+    final stored = meta?.rjCode;
+    if (stored != null && stored.isNotEmpty) return stored;
+
     final work = await workDao().getById(workId);
     final rootPath = work?.rootPath;
-    final fromDir =
-        rootPath == null ? null : parseWorkCode(p.basename(rootPath).trim());
-    if (fromDir != null) return fromDir.code;
-    final meta = await WorkMetadataDao(db()).getByWork(workId);
-    return meta?.rjCode;
+    if (rootPath != null) {
+      final fromPath = _codeInPath(rootPath);
+      if (fromPath != null) return fromPath;
+    }
+
+    final fromTitle = parseWorkCode(work?.name ?? '')?.code;
+    if (fromTitle != null) return fromTitle;
+
+    for (final path in await FolderDao(db()).getPathsByWork(workId)) {
+      final found = _codeInPath(path);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  /// 从路径本身或其任意祖先目录名里取编号。
+  static String? _codeInPath(String path) {
+    var current = p.normalize(path);
+    while (true) {
+      final found = parseWorkCode(p.basename(current))?.code;
+      if (found != null) return found;
+      final parent = p.dirname(current);
+      if (parent == current || parent.isEmpty || parent == '.') return null;
+      current = parent;
+    }
+  }
+
+  /// 手动登记编号。返回规范化后的编号；格式不对返回 null。
+  ///
+  /// 只写 `work_metadata.rj_code`，不动其他字段；下次抓取直接用它。
+  Future<String?> setManualCode(int workId, String input) async {
+    var text = input.trim().toUpperCase();
+    if (RegExp(r'^\d{6,8}$').hasMatch(text)) text = 'RJ$text';
+    if (!isValidWorkCode(text)) return null;
+    await WorkMetadataDao(db()).upsert(WorkMetadata(workId: workId, rjCode: text));
+    _metadata.remove(workId);
+    _works.remove(workId);
+    await prefetch(workId);
+    notifyListeners();
+    return text;
   }
 
   /// 只抓不落库的标签与封面，给预览对话框用。
   Future<DlsiteFetchResult> preview(int workId) async {
     final code = await codeOf(workId);
-    if (code == null) return const DlsiteFetchResult(message: _noCodeMessage);
+    if (code == null) {
+      return const DlsiteFetchResult(
+        message: _noCodeMessage,
+        missingCode: true,
+      );
+    }
     final result = await DlsiteRepository(db(), api: api).preview(workId, code);
     if (result.ok) {
       // 预览已经把元数据落进库，缓存里那份（进作品时预取的）要重读，

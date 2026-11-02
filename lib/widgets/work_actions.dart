@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../services/dlsite/dlsite_cover.dart';
 import '../state/app_state.dart';
+import 'dlsite_code_dialog.dart';
 import 'dlsite_preview_dialog.dart';
 
 /// 作品级的两个动作：抓 DLsite 元数据、从文件里找封面。
@@ -36,7 +37,23 @@ Future<void> fetchDlsiteForCurrentWork(BuildContext context) async {
       duration: Duration(minutes: 1),
     ),
   );
-  final result = await appState.previewDlsiteMetadata(workId);
+  var result = await appState.previewDlsiteMetadata(workId);
+  if (result.missingCode) {
+    // 目录名没编号不是死路：让用户填一次，再接着抓。
+    messenger.hideCurrentSnackBar();
+    if (!context.mounted) return;
+    final code = await showDlsiteCodeDialog(context);
+    if (code == null) return;
+    await appState.setDlsiteCode(workId, code);
+    if (!context.mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('正在抓取 DLsite 元数据…'),
+        duration: Duration(minutes: 1),
+      ),
+    );
+    result = await appState.previewDlsiteMetadata(workId);
+  }
   messenger.hideCurrentSnackBar();
   if (!context.mounted) return;
   final work = result.work;

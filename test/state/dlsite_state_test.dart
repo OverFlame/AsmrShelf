@@ -172,6 +172,79 @@ void main() {
     final result = await state.previewDlsiteMetadata(workId);
     expect(result.ok, isFalse);
     expect(result.message, contains('RJ'));
+    expect(result.missingCode, isTrue);
     expect(transport.calls, isEmpty);
+  });
+
+  test('作品根目录丢了，从 folder_paths 里也能认出编号', () async {
+    final workId = state.works.single.id!;
+    final db = DatabaseManager.instance.db;
+    await db.update('works', {'root_path': null},
+        where: 'id = ?', whereArgs: [workId]);
+    await db.update('work_metadata', {'rj_code': null},
+        where: 'work_id = ?', whereArgs: [workId]);
+
+    final transport = FakeTransport([DlsiteResponse(200, productBody)]);
+    state = AppState(
+      player: PlayerController(),
+      dlsiteApi: DlsiteApi(transport: transport),
+    );
+    await state.init();
+
+    final preview = await state.previewDlsiteMetadata(workId);
+    expect(preview.ok, isTrue);
+    expect(transport.calls.single.toString(), contains('workno=RJ294126'));
+  });
+
+  test('作品目录套了一层「本編」，从祖先目录名里认编号', () async {
+    final workId = state.works.single.id!;
+    final db = DatabaseManager.instance.db;
+    final work = await WorkDao(db).getById(workId);
+    final inner = Directory(p.join(work!.rootPath!, '本編'))
+      ..createSync(recursive: true);
+    await db.update('works', {'root_path': inner.path},
+        where: 'id = ?', whereArgs: [workId]);
+    await db.update('work_metadata', {'rj_code': null},
+        where: 'work_id = ?', whereArgs: [workId]);
+
+    final transport = FakeTransport([DlsiteResponse(200, productBody)]);
+    state = AppState(
+      player: PlayerController(),
+      dlsiteApi: DlsiteApi(transport: transport),
+    );
+    await state.init();
+
+    final preview = await state.previewDlsiteMetadata(workId);
+    expect(preview.ok, isTrue);
+    expect(transport.calls.single.toString(), contains('workno=RJ294126'));
+  });
+
+  test('手动填编号后能直接抓取', () async {
+    final workId = state.works.single.id!;
+    final db = DatabaseManager.instance.db;
+    await db.update('works', {'root_path': null},
+        where: 'id = ?', whereArgs: [workId]);
+    await db.update('work_metadata', {'rj_code': null},
+        where: 'work_id = ?', whereArgs: [workId]);
+    // 文件夹登记也拿掉，模拟「完全认不出编号」的作品。
+    await db.delete('folder_paths', where: 'path LIKE ?', whereArgs: ['%RJ294126%']);
+
+    final transport = FakeTransport([DlsiteResponse(200, productBody)]);
+    state = AppState(
+      player: PlayerController(),
+      dlsiteApi: DlsiteApi(transport: transport),
+    );
+    await state.init();
+
+    final missing = await state.previewDlsiteMetadata(workId);
+    expect(missing.missingCode, isTrue);
+
+    final saved = await state.setDlsiteCode(workId, '378488');
+    expect(saved, 'RJ378488');
+    expect(await state.setDlsiteCode(workId, '不是编号'), isNull);
+
+    final preview = await state.previewDlsiteMetadata(workId);
+    expect(preview.ok, isTrue);
+    expect(transport.calls.single.toString(), contains('workno=RJ378488'));
   });
 }

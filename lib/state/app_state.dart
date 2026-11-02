@@ -1484,6 +1484,10 @@ class AppState extends ChangeNotifier {
   Future<DlsiteFetchResult> previewDlsiteMetadata(int workId) =>
       dlsite.preview(workId);
 
+  /// 手动登记作品编号；返回规范化后的编号，格式不对返回 null。
+  Future<String?> setDlsiteCode(int workId, String input) =>
+      dlsite.setManualCode(workId, input);
+
   /// 用户在预览里确认后应用元数据，[applyCover] 时把封面也换成远程图。
   Future<DlsiteFetchResult> applyDlsiteMetadata(
     int workId,
