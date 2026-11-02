@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider 的可共享目录（BUILD_GUIDE 第 9.5 节）。
+  外链播放要交给系统播放器两类文件：
+    external-path  扫描到的共享存储媒体（/storage/emulated/0/...）
+    files-path     外链播放生成的 m3u8 播放列表（app 私有 files 目录）
+  这里按最小可用范围列出，不加 root-path。
+-->
+<paths>
+    <external-path name="external" path="." />
+    <external-files-path name="external_files" path="." />
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+</paths>
