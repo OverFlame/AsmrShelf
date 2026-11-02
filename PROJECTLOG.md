@@ -339,3 +339,24 @@ dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--d
 | 库内容 | `works` 两行且 `root_path` 为绝对路径；`media` 三行；`work_metadata` 只有 RJ294126 那一行 |
 
 验证：analyze 无问题、`flutter test` 560 例全过。
+
+## 2026-11-02 DLsite 抓取三层（阶段六地面）
+
+三个文件，只做「抓回来、解析、落库」，不碰界面：
+
+| 文件 | 职责 |
+|---|---|
+| `lib/services/dlsite/dlsite_models.dart` | `DlsiteWork` 与 `parseProductJson`，字段按 `docs/DLsite_可获取数据说明.md` 第 3 节取 |
+| `lib/services/dlsite/dlsite_rate_limiter.dart` | `DlsiteRateLimiter` 串行节流（默认 10 秒）、`DlsiteRetryPolicy` 只对 429/503 退避重试两次 |
+| `lib/services/dlsite/dlsite_api.dart` | `DlsiteTransport` 抽象 + `HttpDlsiteTransport`，`DlsiteApi.fetchWork` 判状态码 |
+| `lib/services/dlsite/dlsite_repository.dart` | 7 天缓存、写 `work_metadata`、分类挂 `dlsite` 命名空间、声优挂 `voice` |
+
+几个落地时的判定：
+
+- 接口返回的是单元素数组，`parseProductJson` 兼容对象与数组，坏输入返回 null 不抛。
+- 非 200 必须在传输层抛 `DlsiteException`，否则重试策略看不到状态码：`_get` 里统一抛，`fetchWork` 里只把 404 当「没有这部作品」的正常结果。
+- 缓存命中时用 `work_metadata.raw_json` 反解，不额外存一份解析结果。
+- 远程封面默认不写 `cover_source`：本地有图时不被顶掉，等用户在预览里勾选（`applyCover: true`）。
+- `work_tags` 的挂标签走 `TagDao.attachToWork`，重复挂用 `ConflictAlgorithm.ignore`，重复抓同一部作品新增数为 0。
+
+验证：analyze 无问题、`flutter test` 585 例全过（新增 25 例：解析 8、节流 3、重试 3、落库 11）。
