@@ -238,3 +238,12 @@
 |---|---|
 | `flutter analyze --no-fatal-infos` | 无问题 |
 | `flutter test` | 527 例全过 |
+
+## 2026-11-02 阶段四第四步：删掉只为图片服务的两个接口
+
+| 项 | 改动 |
+|---|---|
+| 接口 | 删 `imagesInFolder`（唯一调用方是已删除的卷封面对话框）、`setImageAlias`（全仓零调用） |
+| 行数 | `lib/state/app_state.dart` 降到 2802 行 |
+
+验证：`flutter analyze --no-fatal-infos` 无问题，`flutter test` 527 例全过。

@@ -1660,17 +1660,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 卷子树里的图片行（第 19.4 节），按自然序排。
-  ///
-  /// 同一张图在图片库照常可见：这里只查 media 行，不动文件夹归属。
-  Future<List<MediaItem>> imagesInFolder(int folderId) async {
-    final rows = await _folderDao.getPaths(folderId);
-    if (rows.isEmpty) return const <MediaItem>[];
-    final dirs = rows.map((row) => row.path).toList();
-    return _mediaDao.queryByDirs(dirs,
-        type: MediaType.image, orderBy: MediaDao.naturalOrderBy);
-  }
-
   // ═══════════════ 字幕归属（BUILD_GUIDE 第 18.5、23.6 节）═══════════════
 
   SubtitleService get _subtitleService =>
@@ -2234,18 +2223,6 @@ class AppState extends ChangeNotifier {
         ..._tagFilter.orTagIds,
         ..._tagFilter.notTagIds,
       };
-
-  /// 设置图片别名（用户命名）。传 null 或空串表示清除。
-  ///
-  /// 写库后重新读回该行，保证内存里的 [MediaItem] 与库一致。
-  Future<void> setImageAlias(int id, String? alias) async {
-    final value = (alias == null || alias.trim().isEmpty) ? null : alias.trim();
-    await _mediaDao.setAlias(id, value);
-    final updated = await _mediaDao.getById(id);
-    if (updated == null) return;
-    _mediaRevision++;
-    notifyListeners();
-  }
 
   void _removeFromFilter(int tagId) {
     _tagFilter = TagFilter(
