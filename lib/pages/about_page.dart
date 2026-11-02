@@ -41,6 +41,8 @@ class AboutPage extends StatelessWidget {
           _header(context),
           const SizedBox(height: 8),
           _description(context),
+          const SizedBox(height: 12),
+          _dlsiteNotice(context),
           const SizedBox(height: 20),
           const Divider(height: 1),
           _infoRow(context, '应用', appName),
@@ -105,8 +107,11 @@ class AboutPage extends StatelessWidget {
             color: AppColors.accent.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(16),
           ),
-          child: const Icon(Icons.perm_media_outlined,
-              size: 36, color: AppColors.accent),
+          child: const Icon(
+            Icons.perm_media_outlined,
+            size: 36,
+            color: AppColors.accent,
+          ),
         ),
         const SizedBox(height: 16),
         Text(
@@ -120,7 +125,10 @@ class AboutPage extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'v$appVersion+$appBuildNumber',
-          style: TextStyle(fontSize: 12, color: AppColors.mutedLightOf(context)),
+          style: TextStyle(
+            fontSize: 12,
+            color: AppColors.mutedLightOf(context),
+          ),
         ),
       ],
     );
@@ -130,12 +138,29 @@ class AboutPage extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Text(
-        '本地媒体库：音频播放与图片浏览合一，\n'
-        '支持标签管理、网格浏览、缩略图缓存与数据目录迁移。',
+        '本地音声库：以作品为单位管理音频，\n'
+        '支持导入、标签、续播、DLsite 元数据与数据目录迁移。',
         textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 12,
           color: AppColors.textSecondaryOf(context),
+          height: 1.5,
+        ),
+      ),
+    );
+  }
+
+  /// DLsite 元数据来自非官方接口，这一条按剥离指南放在关于页，别删。
+  Widget _dlsiteNotice(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      child: Text(
+        'DLsite 元数据来自公开网页的非官方接口，不保证长期可用；'
+        '应用不打包 DLsite 图片，也不抓取付费内容。',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 11,
+          color: AppColors.mutedLightOf(context),
           height: 1.5,
         ),
       ),
@@ -152,15 +177,19 @@ class AboutPage extends StatelessWidget {
             width: 80,
             child: Text(
               label,
-              style:
-                  TextStyle(fontSize: 11, color: AppColors.mutedLightOf(context)),
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.mutedLightOf(context),
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value,
               style: TextStyle(
-                  fontSize: 11, color: AppColors.textPrimaryOf(context)),
+                fontSize: 11,
+                color: AppColors.textPrimaryOf(context),
+              ),
             ),
           ),
         ],
@@ -185,8 +214,10 @@ class AboutPage extends StatelessWidget {
         future: _resolveDir(context, log: isLog),
         builder: (context, snap) => Text(
           snap.data == null ? '$hint\n...' : '$hint\n${snap.data}',
-          style:
-              TextStyle(fontSize: 11, color: AppColors.textSecondaryOf(context)),
+          style: TextStyle(
+            fontSize: 11,
+            color: AppColors.textSecondaryOf(context),
+          ),
           maxLines: 3,
           overflow: TextOverflow.ellipsis,
         ),
@@ -214,8 +245,9 @@ class AboutPage extends StatelessWidget {
       dir = await _resolveDir(context, log: log);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('目录不可用：$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('目录不可用：$e')));
       }
       return;
     }
@@ -226,8 +258,7 @@ class AboutPage extends StatelessWidget {
       LaunchResult.unsupportedPlatform => '当前平台不支持打开目录：$dir',
       LaunchResult.failed => '打开目录失败：$dir',
     };
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   /// 第三方声明：仓库根目录的 [noticesFileName] 不随应用包分发，所以先给出
@@ -246,14 +277,19 @@ class AboutPage extends StatelessWidget {
               '本应用使用的第三方开源组件及其许可证与版权声明，收录在源码根目录的 '
               '$noticesFileName。',
               style: TextStyle(
-                  fontSize: 13, color: AppColors.textSecondaryOf(ctx), height: 1.4),
+                fontSize: 13,
+                color: AppColors.textSecondaryOf(ctx),
+                height: 1.4,
+              ),
             ),
             if (file != null) ...[
               const SizedBox(height: 12),
               SelectableText(
                 file.path,
                 style: TextStyle(
-                    fontSize: 11, color: AppColors.mutedLightOf(ctx)),
+                  fontSize: 11,
+                  color: AppColors.mutedLightOf(ctx),
+                ),
               ),
             ],
           ],
@@ -267,8 +303,9 @@ class AboutPage extends StatelessWidget {
             FilledButton(
               onPressed: () async {
                 final messenger = ScaffoldMessenger.of(ctx);
-                final result = await (launcher ?? VideoLauncher())
-                    .open(file.path);
+                final result = await (launcher ?? VideoLauncher()).open(
+                  file.path,
+                );
                 final msg = result == LaunchResult.ok
                     ? '已用系统默认程序打开 $noticesFileName'
                     : '打开 $noticesFileName 失败';
