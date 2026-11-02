@@ -190,15 +190,30 @@ class _WorkCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final appState = context.read<AppState>();
+    final appState = context.watch<AppState>();
+    final selected = appState.workSelectionMode;
     if (row) {
       return InkWell(
         borderRadius: BorderRadius.circular(8),
-        onTap: () => appState.enterWork(work.id!),
+        onTap: () => _onTap(appState),
+        onLongPress: () => _onLongPress(appState),
         child: SizedBox(
           height: 64,
           child: Row(
             children: [
+              if (selected)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(
+                    appState.isWorkSelected(work.id!)
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    size: 18,
+                    color: appState.isWorkSelected(work.id!)
+                        ? AppColors.accent
+                        : AppColors.mutedOf(context),
+                  ),
+                ),
               CoverImage(
                 path: work.coverPath,
                 width: 56,
@@ -226,7 +241,8 @@ class _WorkCard extends StatelessWidget {
     }
     return InkWell(
       borderRadius: BorderRadius.circular(10),
-      onTap: () => appState.enterWork(work.id!),
+      onTap: () => _onTap(appState),
+      onLongPress: () => _onLongPress(appState),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -240,11 +256,27 @@ class _WorkCard extends StatelessWidget {
                   height: double.infinity,
                   borderRadius: 10,
                 ),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: _menu(context, appState),
-                ),
+                if (appState.workSelectionMode)
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: Icon(
+                      appState.isWorkSelected(work.id!)
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: appState.isWorkSelected(work.id!)
+                          ? AppColors.accent
+                          : Colors.white,
+                      shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
+                    ),
+                  ),
+                if (!appState.workSelectionMode)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: _menu(context, appState),
+                  ),
               ],
             ),
           ),
@@ -261,6 +293,19 @@ class _WorkCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  void _onTap(AppState appState) {
+    if (appState.workSelectionMode) {
+      appState.toggleWorkSelect(work.id!);
+    } else {
+      appState.enterWork(work.id!);
+    }
+  }
+
+  void _onLongPress(AppState appState) {
+    if (!appState.workSelectionMode) appState.enterWorkSelectionMode();
+    if (!appState.isWorkSelected(work.id!)) appState.toggleWorkSelect(work.id!);
   }
 
   Widget _menu(BuildContext context, AppState appState) {

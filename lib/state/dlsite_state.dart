@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common/sqlite_api.dart';
@@ -10,6 +12,7 @@ import '../services/dlsite/dlsite_cover.dart';
 import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
 import '../services/dlsite/work_code.dart';
+import '../utils/log_util.dart';
 
 /// DLsite 元数据状态：从作品目录名认出编号、抓取、预览、应用。
 ///
@@ -142,6 +145,84 @@ class DlsiteState extends ChangeNotifier {
   void invalidate() {
     _metadata.clear();
     _works.clear();
+    notifyListeners();
+  }
+
+  // ═══════════════ 批量抓取队列 ═══════════════
+
+  /// 排队中的作品 id。抓完一部才取下一部，请求间隔由 [DlsiteApi] 的限速器控制。
+  final List<int> _scrapeQueue = [];
+  bool _scrapeRunning = false;
+  bool _scrapeCancelRequested = false;
+  int _scrapeTotal = 0;
+  int _scrapeDone = 0;
+  int _scrapeFailed = 0;
+
+  /// 本批共排入多少部。
+  int get scrapeTotal => _scrapeTotal;
+
+  /// 本批已处理多少部（成功与失败合计）。
+  int get scrapeDone => _scrapeDone;
+
+  /// 本批失败多少部（没有 RJ 号、网络失败、解析失败都算）。
+  int get scrapeFailed => _scrapeFailed;
+
+  bool get scrapeRunning => _scrapeRunning;
+
+  /// 把一批作品排进抓取队列。重复排入同一部会被忽略。
+  ///
+  /// 队列在后台跑，调用方不用 await；进度由 [scrapeTotal]/[scrapeDone] 通知。
+  void enqueueScrape(Iterable<int> workIds) {
+    final pending = <int>[];
+    for (final id in workIds) {
+      if (_scrapeQueue.contains(id) || pending.contains(id)) continue;
+      pending.add(id);
+    }
+    if (pending.isEmpty) return;
+    if (!_scrapeRunning) {
+      _scrapeTotal = 0;
+      _scrapeDone = 0;
+      _scrapeFailed = 0;
+      _scrapeCancelRequested = false;
+    }
+    _scrapeQueue.addAll(pending);
+    _scrapeTotal += pending.length;
+    notifyListeners();
+    if (!_scrapeRunning) unawaited(_runScrapeQueue());
+  }
+
+  Future<void> _runScrapeQueue() async {
+    _scrapeRunning = true;
+    notifyListeners();
+    try {
+      while (_scrapeQueue.isNotEmpty && !_scrapeCancelRequested) {
+        final workId = _scrapeQueue.removeAt(0);
+        try {
+          final result = await fetch(workId);
+          if (!result.ok) {
+            _scrapeFailed++;
+            logWarn('DlsiteState', '批量抓取失败 work=$workId：${result.message}');
+          }
+        } catch (e) {
+          _scrapeFailed++;
+          logWarn('DlsiteState', '批量抓取异常 work=$workId', e);
+        }
+        _scrapeDone++;
+        notifyListeners();
+      }
+    } finally {
+      _scrapeRunning = false;
+      _scrapeQueue.clear();
+      _scrapeCancelRequested = false;
+      notifyListeners();
+    }
+  }
+
+  /// 取消剩余排队项。正在抓的那一部会跑完，结果照常落库。
+  void cancelScrapeQueue() {
+    if (!_scrapeRunning) return;
+    _scrapeCancelRequested = true;
+    _scrapeQueue.clear();
     notifyListeners();
   }
 

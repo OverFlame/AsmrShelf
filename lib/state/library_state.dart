@@ -81,6 +81,11 @@ class LibraryState extends ChangeNotifier {
   bool selectionMode = false;
   int? anchorTrackId;
 
+  // ── 作品多选 ──
+  /// 作品层批量操作（删除、刷新、抓取、打标签）的选中集合。
+  final Set<int> selectedWorkIds = {};
+  bool workSelectionMode = false;
+
   /// 每次 refresh 递增。用于丢弃「先发起但后完成」的旧结果。
   int _refreshGeneration = 0;
 
@@ -96,6 +101,9 @@ class LibraryState extends ChangeNotifier {
     }
     works = allWorks;
     unassignedFolders = unassigned;
+    // 作品选中集合只保留库里还在的：别处删掉的作品不能继续参与批量操作。
+    final liveIds = allWorks.map((w) => w.id).whereType<int>().toSet();
+    selectedWorkIds.retainAll(liveIds);
     notifyListeners();
     await _loadCenter(gen);
   }
@@ -318,4 +326,40 @@ class LibraryState extends ChangeNotifier {
 
   /// 只读快照，调用方改不到内部集合。
   Set<int> get selectedView => UnmodifiableSetView(selectedTrackIds);
+
+  // ═══════════════ 作品多选 ═══════════════
+
+  /// 只读快照，调用方改不到内部集合。
+  Set<int> get selectedWorkView => UnmodifiableSetView(selectedWorkIds);
+
+  bool isWorkSelected(int id) => selectedWorkIds.contains(id);
+
+  void toggleWorkSelect(int id) {
+    if (selectedWorkIds.contains(id)) {
+      selectedWorkIds.remove(id);
+    } else {
+      selectedWorkIds.add(id);
+    }
+    notifyListeners();
+  }
+
+  void enterWorkSelectionMode() {
+    workSelectionMode = true;
+    notifyListeners();
+  }
+
+  void clearWorkSelection() {
+    workSelectionMode = false;
+    selectedWorkIds.clear();
+    notifyListeners();
+  }
+
+  /// 选中当前作品列表里的全部（多选工具条的「全选」）。
+  void selectAllWorks() {
+    workSelectionMode = true;
+    selectedWorkIds
+      ..clear()
+      ..addAll(works.map((w) => w.id).whereType<int>());
+    notifyListeners();
+  }
 }

@@ -136,4 +136,42 @@ void main() {
     await state.refresh();
     expect(state.tracks.map((t) => t.filename), ['睡眠導入.mp3']);
   });
+
+  test('作品多选：进入、切换、全选与清空', () async {
+    final db = DatabaseManager.instance.db;
+    final a = await WorkDao(db).create('作品A');
+    final b = await WorkDao(db).create('作品B');
+    await state.refresh();
+
+    state.enterWorkSelectionMode();
+    state.toggleWorkSelect(a.id!);
+    state.toggleWorkSelect(b.id!);
+    expect(state.workSelectionMode, isTrue);
+    expect(state.selectedWorkIds, {a.id, b.id});
+
+    state.toggleWorkSelect(a.id!);
+    expect(state.selectedWorkIds, {b.id});
+
+    state.selectAllWorks();
+    expect(state.selectedWorkIds, {a.id, b.id});
+    expect(state.isWorkSelected(a.id!), isTrue);
+
+    state.clearWorkSelection();
+    expect(state.workSelectionMode, isFalse);
+    expect(state.selectedWorkIds, isEmpty);
+  });
+
+  test('refresh 把已删除的作品从选中集合里去掉', () async {
+    final db = DatabaseManager.instance.db;
+    final a = await WorkDao(db).create('作品A');
+    final b = await WorkDao(db).create('作品B');
+    await state.refresh();
+    state.enterWorkSelectionMode();
+    state.toggleWorkSelect(a.id!);
+    state.toggleWorkSelect(b.id!);
+
+    await WorkDao(db).delete(b.id!);
+    await state.refresh();
+    expect(state.selectedWorkIds, {a.id});
+  });
 }

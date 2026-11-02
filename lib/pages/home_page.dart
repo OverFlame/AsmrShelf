@@ -10,11 +10,13 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/dialogs.dart' show confirmDialog, pickDirectory;
+import '../widgets/dlsite_queue_chip.dart';
 import '../widgets/filter_dialog.dart';
 import '../widgets/folder_browser.dart';
 import '../widgets/player_bar.dart';
 import '../widgets/split_handle.dart';
 import '../widgets/tag_panel.dart';
+import '../widgets/tag_picker_dialog.dart';
 import '../widgets/thumb_backfill_chip.dart';
 import '../widgets/works_grid.dart';
 import 'settings_page.dart';
@@ -109,6 +111,12 @@ class _HomePageState extends State<HomePage> {
             bottom: MediaQuery.of(context).padding.bottom + 76,
             child: const ThumbBackfillChip(),
           ),
+        if (appState.dlsite.scrapeRunning)
+          Positioned(
+            right: 12,
+            bottom: MediaQuery.of(context).padding.bottom + 76,
+            child: const DlsiteQueueChip(),
+          ),
       ],
     );
   }
@@ -198,9 +206,13 @@ class _HomePageState extends State<HomePage> {
     if (appState.currentWork != null) return const FolderBrowser();
     return Column(
       children: [
-        const _VisualToolbar(),
+        if (appState.workSelectionMode)
+          _WorkSelectionToolbar(appState: appState)
+        else
+          const _VisualToolbar(),
         const Divider(height: 1),
-        if (appState.recentTracks.isNotEmpty) _RecentBar(appState: appState),
+        if (!appState.workSelectionMode && appState.recentTracks.isNotEmpty)
+          _RecentBar(appState: appState),
         const Expanded(child: WorksGrid(library: 'audio')),
       ],
     );
@@ -417,14 +429,14 @@ class _VisualToolbar extends StatelessWidget {
                 ),
               iconButton(
                 key: ValueKey('audio-toolbar-select'),
-                tooltip: appState.selectionMode ? '退出多选' : '多选',
-                icon: appState.selectionMode
-                    ? Icons.check_box
-                    : Icons.check_box_outline_blank,
-                color: appState.selectionMode ? AppColors.accent : null,
-                onPressed: () => appState.selectionMode
-                    ? appState.clearTrackSelection()
-                    : appState.enterTrackSelectionMode(),
+                tooltip: '多选作品',
+                icon: Icons.check_box_outline_blank,
+                onPressed: () {
+                  // 这根工具条只在首页作品层出现：作品多选由此进入，曲目多选
+                  // 在作品内的工具条上，两者不共用同一个入口。
+                  appState.clearWorkSelection();
+                  appState.enterWorkSelectionMode();
+                },
               ),
               // 音频侧独有的两个动作并进这里：本目录音频成队播放，以及往当前作品
               // 再补一个文件夹（图片、视频、音频都收）。
@@ -682,6 +694,190 @@ class _VisualToolbar extends StatelessWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('已清理 $removed 个缩略图缓存文件')));
+  }
+}
+
+/// 作品多选工具条：批量删除、刷新、打标签与抓取 DLsite。
+///
+/// 与 [_VisualToolbar] 互斥显示：进多选后原工具条让位，避免两排按钮抢空间。
+class _WorkSelectionToolbar extends StatelessWidget {
+  const _WorkSelectionToolbar({required this.appState});
+
+  final AppState appState;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = appState.selectedWorkIds.length;
+    return SizedBox(
+      height: 48,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Row(
+          children: [
+            IconButton(
+              key: const ValueKey('work-select-exit'),
+              tooltip: '退出多选',
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: appState.clearWorkSelection,
+            ),
+            Text(
+              '已选 $count 部',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey('work-select-all'),
+              onPressed: () {
+                if (count == appState.works.length) {
+                  appState.clearWorkSelection();
+                  appState.enterWorkSelectionMode();
+                } else {
+                  appState.selectAllWorks();
+                }
+              },
+              child: Text(
+                count == appState.works.length ? '取消全选' : '全选',
+                style: const TextStyle(fontSize: 12),
+              ),
+            ),
+            IconButton(
+              key: const ValueKey('work-batch-dlsite'),
+              tooltip: '批量抓取 DLsite 元数据',
+              icon: const Icon(Icons.cloud_download_outlined, size: 18),
+              onPressed: count == 0
+                  ? null
+                  : () => _batchScrape(context),
+            ),
+            IconButton(
+              key: const ValueKey('work-batch-refresh'),
+              tooltip: '按磁盘刷新选中作品',
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: count == 0
+                  ? null
+                  : () => _batchRefresh(context),
+            ),
+            IconButton(
+              key: const ValueKey('work-batch-tags'),
+              tooltip: '批量添加标签',
+              icon: const Icon(Icons.label_outline, size: 18),
+              onPressed: count == 0 ? null : () => _batchTags(context, add: true),
+            ),
+            IconButton(
+              key: const ValueKey('work-batch-tags-remove'),
+              tooltip: '批量移除标签',
+              icon: const Icon(Icons.label_off_outlined, size: 18),
+              onPressed:
+                  count == 0 ? null : () => _batchTags(context, add: false),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              key: const ValueKey('work-batch-delete'),
+              tooltip: '删除选中作品',
+              icon: const Icon(Icons.delete_outline, size: 18),
+              color: AppColors.danger,
+              onPressed: count == 0 ? null : () => _batchDelete(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _batchDelete(BuildContext context) async {
+    final ids = List<int>.from(appState.selectedWorkIds);
+    var media = 0;
+    for (final id in ids) {
+      media += await appState.countMediaUnderWork(id);
+    }
+    if (!context.mounted) return;
+    final ok = await confirmDialog(
+      context,
+      title: '删除选中的 ${ids.length} 部作品？',
+      content: '将从软件里移除这些作品、它们下面的文件夹，以及其中的 $media 条媒体记录。\n'
+          '磁盘文件不会被删除，之后可以重新导入。',
+    );
+    if (ok != true || !context.mounted) return;
+    await appState.deleteWorks(ids);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已删除 ${ids.length} 部作品')));
+  }
+
+  Future<void> _batchRefresh(BuildContext context) async {
+    final ids = List<int>.from(appState.selectedWorkIds);
+    final outcome = await appState.rescanWorks(ids);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          outcome.changed
+              ? '刷新完成：新增 ${outcome.added} 首，清理 ${outcome.removed} 首'
+              : '这 ${ids.length} 部作品没有变化',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _batchScrape(BuildContext context) async {
+    final ids = List<int>.from(appState.selectedWorkIds);
+    appState.enqueueDlsiteScrape(ids);
+    appState.clearWorkSelection();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已把 ${ids.length} 部作品排进 DLsite 抓取队列')),
+    );
+  }
+
+  Future<void> _batchTags(BuildContext context, {required bool add}) async {
+    final ids = List<int>.from(appState.selectedWorkIds);
+    final mediaIds = <int>{};
+    for (final workId in ids) {
+      mediaIds.addAll(await appState.mediaIdsUnderWork(workId));
+    }
+    if (!context.mounted) return;
+    if (mediaIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('选中的作品里还没有媒体，先导入再看标签')),
+      );
+      return;
+    }
+    Set<int>? current;
+    if (!add) {
+      current = await appState.getTagIdsOnMedia(mediaIds);
+      if (!context.mounted) return;
+      if (current.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('选中的作品里的媒体还没有标签')),
+        );
+        return;
+      }
+    }
+    final tags = await showTagPickerDialog(
+      context,
+      title: add
+          ? '为 ${ids.length} 部作品添加标签（${mediaIds.length} 条媒体）'
+          : '移除选中作品的标签',
+      filterTagIds: add ? null : current,
+    );
+    if (tags == null || tags.isEmpty) return;
+    if (add) {
+      await appState.addTagsToWorks(ids, tags);
+    } else {
+      await appState.removeTagsFromWorks(ids, tags);
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '已${add ? '添加' : '移除'} ${tags.length} 个标签 → ${mediaIds.length} 条媒体',
+        ),
+      ),
+    );
   }
 }
 

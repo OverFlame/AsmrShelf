@@ -378,6 +378,27 @@ void main() {
     expect(find.byType(WorksGrid), findsOneWidget);
   });
 
+  testWidgets('工具条进入作品多选，点卡片是选中而不是进作品', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+
+    await tester.tap(find.byKey(const ValueKey('audio-toolbar-select')));
+    await tester.pump();
+    expect(app.workSelectionMode, isTrue);
+    expect(find.byKey(const ValueKey('work-select-exit')), findsOneWidget);
+
+    await tester.tap(find.byKey(ValueKey('work-card-$audioWorkId')));
+    await tester.pump();
+    expect(app.selectedWorkIds, contains(audioWorkId));
+    expect(app.currentWork, isNull, reason: '多选时点卡片不进入作品');
+    expect(find.byIcon(Icons.check_circle), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('work-select-exit')));
+    await tester.pump();
+    expect(app.workSelectionMode, isFalse);
+    expect(app.selectedWorkIds, isEmpty);
+  });
+
   testWidgets('窗口很矮时布局不溢出，标签区仍在', (tester) async {
     tester.view.physicalSize = const Size(1000, 360);
     tester.view.devicePixelRatio = 1.0;

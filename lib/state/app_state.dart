@@ -98,6 +98,16 @@ class AppState extends ChangeNotifier {
   Set<int> get selectedTrackIds => library.selectedView;
   bool get selectionMode => library.selectionMode;
   bool isTrackSelected(int id) => library.isSelected(id);
+
+  // ── 作品多选（状态在 LibraryState）──
+  Set<int> get selectedWorkIds => library.selectedWorkView;
+  bool get workSelectionMode => library.workSelectionMode;
+  bool isWorkSelected(int id) => library.isWorkSelected(id);
+  void toggleWorkSelect(int id) => library.toggleWorkSelect(id);
+  void enterWorkSelectionMode() => library.enterWorkSelectionMode();
+  void clearWorkSelection() => library.clearWorkSelection();
+  void selectAllWorks() => library.selectAllWorks();
+
   TagFilter get tagFilter => tags.tagFilter;
   String get advancedFilter => tags.advancedFilter;
   bool get hasAdvancedFilter => tags.hasAdvancedFilter;
@@ -1347,50 +1357,23 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  /// 以磁盘为准重扫全部音频作品：补新文件、删失联行。
+  /// 以磁盘为准重扫音频作品：补新文件、删失联行。
   ///
   /// 刷新按钮走这条，普通 `refresh()` 不走：库可能有几千条路径，逐条 stat 不能
-  /// 挂在每次界面刷新上。返回给界面弹提示用的计数。
-  Future<RescanOutcome> rescanFromDisk() async {
+  /// 挂在每次界面刷新上。传 [workIds] 时只重扫这几部（作品层批量刷新）。
+  /// 返回给界面弹提示用的计数。
+  Future<RescanOutcome> rescanFromDisk({Iterable<int>? workIds}) async {
+    final wanted = workIds?.toSet();
     final works = await _workDao.listAll();
     var added = 0;
     var removed = 0;
     var missingRoots = 0;
     for (final work in works) {
-      final root = work.rootPath?.trim();
-      if (work.library != 'audio' || root == null || root.isEmpty) continue;
-      if (!await Directory(root).exists()) {
-        missingRoots++;
-        continue;
-      }
-      final now = DateTime.now().millisecondsSinceEpoch;
-      final rows = <Map<String, Object?>>[];
-      await for (final entity in Directory(
-        root,
-      ).list(recursive: true, followLinks: false)) {
-        if (entity is! File) continue;
-        final path = entity.path;
-        if (!audioExtensions.contains(extOfPath(path))) continue;
-        final fileName = baseNameOfPath(path);
-        rows.add({
-          'path': path,
-          'media_type': MediaType.audio.value,
-          'filename': fileName,
-          'title': trackTitle(fileName),
-          'added_at': now,
-          'sort_key': sortKeyOfPath(path),
-        });
-      }
-      if (rows.isNotEmpty) added += await _mediaDao.insertRows(rows);
-      // 失联行：库里登记在这部作品下、磁盘上已经没有的音频
-      final existing = await _mediaDao.queryByDirs([
-        root,
-      ], type: MediaType.audio);
-      final stale = <String>[];
-      for (final item in existing) {
-        if (!await File(item.path).exists()) stale.add(item.path);
-      }
-      removed += await _mediaDao.deleteByPaths(stale, type: MediaType.audio);
+      if (wanted != null && !wanted.contains(work.id)) continue;
+      final outcome = await _rescanOneWork(work);
+      added += outcome.added;
+      removed += outcome.removed;
+      if (outcome.missingRoots > 0) missingRoots++;
     }
     logInfo('AppState', '重扫磁盘：新增 $added 条，删除失联 $removed 条，缺目录 $missingRoots 个');
     return RescanOutcome(
@@ -1399,6 +1382,93 @@ class AppState extends ChangeNotifier {
       missingRoots: missingRoots,
     );
   }
+
+  /// 重扫一部作品：补磁盘上多出来的音频行，删库里已失联的行。
+  Future<RescanOutcome> _rescanOneWork(Work work) async {
+    final root = work.rootPath?.trim();
+    if (work.library != 'audio' || root == null || root.isEmpty) {
+      return const RescanOutcome(added: 0, removed: 0, missingRoots: 0);
+    }
+    if (!await Directory(root).exists()) {
+      return const RescanOutcome(added: 0, removed: 0, missingRoots: 1);
+    }
+    var added = 0;
+    var removed = 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = <Map<String, Object?>>[];
+    await for (final entity in Directory(
+      root,
+    ).list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final path = entity.path;
+      if (!audioExtensions.contains(extOfPath(path))) continue;
+      final fileName = baseNameOfPath(path);
+      rows.add({
+        'path': path,
+        'media_type': MediaType.audio.value,
+        'filename': fileName,
+        'title': trackTitle(fileName),
+        'added_at': now,
+        'sort_key': sortKeyOfPath(path),
+      });
+    }
+    if (rows.isNotEmpty) added += await _mediaDao.insertRows(rows);
+    // 失联行：库里登记在这部作品下、磁盘上已经没有的音频
+    final existing = await _mediaDao.queryByDirs([
+      root,
+    ], type: MediaType.audio);
+    final stale = <String>[];
+    for (final item in existing) {
+      if (!await File(item.path).exists()) stale.add(item.path);
+    }
+    removed += await _mediaDao.deleteByPaths(stale, type: MediaType.audio);
+    return RescanOutcome(added: added, removed: removed, missingRoots: 0);
+  }
+
+  /// 批量删除选中的作品（只删库里的记录与文件夹，不动磁盘文件）。
+  Future<int> deleteWorks(Iterable<int> workIds) async {
+    var deleted = 0;
+    for (final id in workIds.toSet()) {
+      deleted += await deleteWorkDeep(id);
+    }
+    clearWorkSelection();
+    await refresh();
+    logInfo('AppState', '批量删除作品 ${workIds.length} 部，媒体记录 $deleted 条');
+    return deleted;
+  }
+
+  /// 批量刷新选中的作品：以磁盘为准补新文件、清理失联行。
+  Future<RescanOutcome> rescanWorks(Iterable<int> workIds) async {
+    final outcome = await rescanFromDisk(workIds: workIds);
+    await refresh();
+    return outcome;
+  }
+
+  /// 批量给作品下的全部媒体加标签。返回实际作用的媒体条数。
+  Future<int> addTagsToWorks(Iterable<int> workIds, List<Tag> list) async {
+    final ids = <int>{};
+    for (final workId in workIds) {
+      ids.addAll(await mediaIdsUnderWork(workId));
+    }
+    if (ids.isEmpty) return 0;
+    await addTagsToMedia(ids, list);
+    return ids.length;
+  }
+
+  /// 批量移除作品标签。返回实际作用的媒体条数。
+  Future<int> removeTagsFromWorks(Iterable<int> workIds, List<Tag> list) async {
+    final ids = <int>{};
+    for (final workId in workIds) {
+      ids.addAll(await mediaIdsUnderWork(workId));
+    }
+    if (ids.isEmpty) return 0;
+    await removeTagsFromMedia(ids, list);
+    return ids.length;
+  }
+
+  /// 把选中的作品排进 DLsite 批量抓取队列。
+  void enqueueDlsiteScrape(Iterable<int> workIds) =>
+      dlsite.enqueueScrape(workIds);
 
   /// 给一部作品抓 DLsite 元数据并直接落库。
   ///
