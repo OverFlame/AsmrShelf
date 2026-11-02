@@ -272,14 +272,14 @@ class _VisualToolbar extends StatelessWidget {
                 ),
               iconButton(
                 key: ValueKey('audio-toolbar-select'),
-                tooltip: appState.visualSelectionMode ? '退出多选' : '多选',
-                icon: appState.visualSelectionMode
+                tooltip: appState.selectionMode ? '退出多选' : '多选',
+                icon: appState.selectionMode
                     ? Icons.check_box
                     : Icons.check_box_outline_blank,
-                color: appState.visualSelectionMode ? AppColors.accent : null,
-                onPressed: () => appState.visualSelectionMode
-                    ? appState.exitVisualSelectionMode()
-                    : appState.enterVisualSelectionMode(),
+                color: appState.selectionMode ? AppColors.accent : null,
+                onPressed: () => appState.selectionMode
+                    ? appState.clearTrackSelection()
+                    : appState.enterTrackSelectionMode(),
               ),
               // 音频侧独有的两个动作并进这里：本目录音频成队播放，以及往当前作品
               // 再补一个文件夹（图片、视频、音频都收）。

@@ -9,7 +9,6 @@ import 'package:asmrshelf/db/database.dart';
 import 'package:asmrshelf/db/folder_dao.dart';
 import 'package:asmrshelf/db/media_dao.dart';
 import 'package:asmrshelf/db/tag_dao.dart';
-import 'package:asmrshelf/db/work_dao.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
 import 'package:asmrshelf/services/settings_service.dart';
 import 'package:asmrshelf/state/app_state.dart';
@@ -160,58 +159,31 @@ void main() {
     expect(state.knownNamespaces, containsAll(<String>['风格', '场景']));
   });
 
-  test('批量移除记录只删数据库行，磁盘文件与其它库的记录不受影响', () async {
-    final work = await WorkDao(DatabaseManager.instance.db)
-        .create('图库', library: 'media');
-    final folder = await folders.create('照片',
-        workId: work.id, library: 'media');
-    await folders.addPath(folder.id!, tmp.path);
-
-    final mp3a = File(p.join(tmp.path, 'a.mp3'))..writeAsStringSync('a');
-    final mp3b = File(p.join(tmp.path, 'b.mp3'))..writeAsStringSync('b');
-    final png = File(p.join(tmp.path, 'cover.png'))..writeAsStringSync('c');
-    final ida = await addMedia(mp3a.path, MediaType.audio);
-    final idb = await addMedia(mp3b.path, MediaType.audio);
-    final idc = await addMedia(png.path, MediaType.image);
-
-    // 进这个多媒体作品下的文件夹：多媒体栏把三种类型一起平铺，
-    // 刷新时选中的可见项才会留住。
-    await state.enterWork(work.id!);
-    await state.enterFolder(folder.id!);
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    expect(state.images.map((i) => i.id).toList(), [ida, idb, idc],
-        reason: '多媒体栏平铺本层的音频与图片');
+  test('批量移除记录只删数据库行，磁盘文件原样留着', () async {
+    final a = File(p.join(tmp.path, 'a.mp3'))..writeAsStringSync('a');
+    final b = File(p.join(tmp.path, 'b.mp3'))..writeAsStringSync('b');
+    final ida = await addMedia(a.path, MediaType.audio);
+    final idb = await addMedia(b.path, MediaType.audio);
     final tag = await state.createTag('风景');
     await state.addTagsToMedia([ida, idb], [tag]);
 
-    state.enterVisualSelectionMode(idc);
-    expect(state.visualSelectionMode, isTrue);
+    expect(await state.deleteMediaByIds([ida]), 1);
 
-    final deleted = await state.deleteMediaByIds([ida, idb]);
-
-    expect(deleted, 2);
-    expect(mp3a.existsSync() && mp3b.existsSync() && png.existsSync(), isTrue,
+    expect(a.existsSync() && b.existsSync(), isTrue,
         reason: '删除是「从软件里移除」，磁盘文件必须原样留着');
-    final left = await media.queryByDirs([tmp.path]);
-    expect(left.map((m) => m.id).toList(), [idc]);
-    expect(await relationCount('media_tags', tag.id!), 0,
-        reason: '被删媒体的标签关联一起走');
-    expect(state.selectedIds, contains(idc),
-        reason: '没删的选中项要留着');
-    expect(state.isSelected(ida), isFalse);
-    expect(state.visualSelectionMode, isTrue,
-        reason: '还有选中项时不退出多选');
+    expect((await media.queryByDirs([tmp.path])).map((m) => m.id).toList(),
+        [idb]);
+    expect(await relationCount('media_tags', tag.id!), 1,
+        reason: '被删那条的关联一起走，剩下那条还在');
   });
+
   test('批量移除记录删空之后关掉多选与锚点', () async {
     final f = File(p.join(tmp.path, 'a.mp3'))..writeAsStringSync('a');
     final id = await addMedia(f.path, MediaType.audio);
-    state.enterVisualSelectionMode(id);
-    state.toggleTrackSelect(id);
+    state.enterSelectionMode(id);
 
     expect(await state.deleteMediaByIds([id]), 1);
 
-    expect(state.visualSelectionMode, isFalse);
-    expect(state.selectedIds, isEmpty);
     expect(state.selectionMode, isFalse);
     expect(state.selectedTrackIds, isEmpty);
     expect(f.existsSync(), isTrue);

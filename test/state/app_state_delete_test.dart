@@ -87,11 +87,6 @@ void main() {
     expect(await state.countMediaUnderFolder(album.id!), 3,
         reason: '曲目 2 条加图片 1 条，都要算进提醒的条数');
 
-    // 查看器正看着这张封面，删除后要自动收起来
-    final coverRow = (await media.queryByDirs([albumDir]))
-        .firstWhere((m) => m.mediaType == MediaType.image);
-    state.openViewer([coverRow], 0);
-
     final deleted = await state.deleteFolderDeep(album.id!);
 
     expect(deleted, 3);
@@ -100,7 +95,6 @@ void main() {
     expect(await folders.getById(imageFolder.id!), isNull,
         reason: '同目录的图片库文件夹记录一起移除，不能留下指向空目录的树节点');
     expect(await media.queryByDirs([tmp.path]), isEmpty);
-    expect(state.showViewer, isFalse, reason: '查看器里的图已被删，不能继续显示');
     expect(
         mp3.existsSync() && subMp3.existsSync() && cover.existsSync(), isTrue,
         reason: '只动数据库，磁盘文件必须原样留着');

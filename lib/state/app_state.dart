@@ -95,41 +95,6 @@ class AppState extends ChangeNotifier {
   /// 线性扫描，两万张图时每次通知都要扫一遍。
   final Map<int, MediaItem> _imageIndex = {};
 
-  /// 当前界面上真正看得见的媒体 id。
-  ///
-  /// 作品层由 [ImageGrid] 自己查媒体行（`_images` 那一层只有文件夹），
-  /// 所以「全选」「区间选」不能只看 [_images]，要听这里的登记。
-  List<int> _visibleMediaIds = const [];
-
-  /// [ImageGrid] 每次重建后登记可见媒体；内容没变就不通知，避免死循环。
-  ///
-  /// 同时把媒体行并进 [_imageIndex]：作品层的 [_images] 只有文件夹，媒体行是
-  /// [ImageGrid] 自己查出来的，不登记的话 [selectedImage] 解析不到，图片详情
-  /// 面板与窄屏详情页只会显示占位。
-  void reportVisibleMedia(List<MediaItem> items) {
-    for (final item in items) {
-      final id = item.id;
-      if (id != null) _imageIndex[id] = item;
-    }
-    final ids = items.map((i) => i.id).whereType<int>().toList();
-    if (ids.length == _visibleMediaIds.length) {
-      var same = true;
-      for (var i = 0; i < ids.length; i++) {
-        if (ids[i] != _visibleMediaIds[i]) {
-          same = false;
-          break;
-        }
-      }
-      if (same) return;
-    }
-    _visibleMediaIds = List<int>.unmodifiable(ids);
-    notifyListeners();
-  }
-
-  /// 能被「全选」「区间选」摸到的媒体：优先当前列表，其次界面登记的可见项。
-  List<int> get _selectableMediaIds => _images.isNotEmpty
-      ? _images.map((i) => i.id).whereType<int>().toList()
-      : _visibleMediaIds;
 
   /// 统一替换图片列表并重建索引（不要直接给 [_images] 赋值）。
   void _setImages(List<MediaItem> list) {
@@ -177,21 +142,6 @@ class AppState extends ChangeNotifier {
   String get advancedFilter => _advancedFilter;
   bool get hasAdvancedFilter => _advancedFilter.trim().isNotEmpty;
 
-  // ── 图片单选 + 多选 ──
-  int? _selectedImageId;
-  int? get selectedId => _selectedImageId;
-  MediaItem? get selectedImage =>
-      _selectedImageId == null ? null : _imageIndex[_selectedImageId];
-  final Set<int> _selectedImageIds = {};
-  /// 只读视图：调用方拿不到内部集合，改不到选中状态。
-  Set<int> get selectedIds => UnmodifiableSetView(_selectedImageIds);
-  bool isSelected(int id) => _selectedImageIds.contains(id);
-  int? _anchorImageId;
-
-  /// 视觉库多选模式。开启后单击是勾选而不是打开，长按、Ctrl 点击或工具栏
-  /// 的「多选」都会打开它；选中集合清空时自动关掉。
-  bool _visualSelectionMode = false;
-  bool get visualSelectionMode => _visualSelectionMode;
 
   // ── 图片视图设置 ──
   int _gridColumns = 4;
@@ -243,17 +193,6 @@ class AppState extends ChangeNotifier {
   static const Duration _thumbBackfillNotifyGap = Duration(milliseconds: 250);
   DateTime? _thumbBackfillLastNotify;
 
-  // ── 全屏查看器 ──
-  List<MediaItem> _viewerImages = [];
-  List<MediaItem> get viewerImages => _viewerImages;
-  int _viewerIndex = 0;
-  int get viewerIndex => _viewerIndex;
-  bool _showViewer = false;
-  bool get showViewer => _showViewer;
-  MediaItem? get viewerImage =>
-      _viewerIndex >= 0 && _viewerIndex < _viewerImages.length
-          ? _viewerImages[_viewerIndex]
-          : null;
 
   // ── 导入状态 ──
   bool _importing = false;
@@ -699,131 +638,20 @@ class AppState extends ChangeNotifier {
   /// `tracks` 视图；[_loadCenter] 据此决定装填方式。
   bool get isVisualLibrary => currentLibrary == 'media';
 
-  /// 单选（普通点击）
-  void selectImage(int? id) {
-    _selectedImageId = id;
-    _selectedImageIds
-      ..clear()
-      ..addAll({?id});
-    _anchorImageId = id;
-    notifyListeners();
-  }
-
-  /// 切换多选（Ctrl+点击）
-  void toggleSelect(int id) {
-    _visualSelectionMode = true;
-    if (_selectedImageIds.contains(id)) {
-      _selectedImageIds.remove(id);
-    } else {
-      _selectedImageIds.add(id);
-    }
-    _selectedImageId = id;
-    _anchorImageId = id;
-    notifyListeners();
-  }
-
-  /// 区间多选（Shift+点击，按当前图片列表顺序从锚点到目标）
-  void rangeSelect(int id) {
-    final ids = _selectableMediaIds;
-    final anchorIdx =
-        _anchorImageId == null ? -1 : ids.indexOf(_anchorImageId!);
-    final curIdx = ids.indexOf(id);
-    if (anchorIdx < 0 || curIdx < 0) {
-      toggleSelect(id);
-      return;
-    }
-    final lo = anchorIdx < curIdx ? anchorIdx : curIdx;
-    final hi = anchorIdx < curIdx ? curIdx : anchorIdx;
-    _selectedImageIds.addAll(ids.sublist(lo, hi + 1));
-    _selectedImageId = id;
-    notifyListeners();
-  }
-
-  void clearSelection() {
-    _visualSelectionMode = false;
-    _selectedImageId = null;
-    _selectedImageIds.clear();
-    _anchorImageId = null;
-    notifyListeners();
-  }
-
-  /// 打开图片详情前的兜底选中：没有有效选中项时退到查看器当前图，再退到当前
-  /// 列表第一张。返回 false 表示当前上下文里一张图都没有。
-  ///
-  /// 没有这一步时，手机/桌面在作品层点「图片详情」只会看到一个占位（以前
-  /// 只有手动单击过磁贴、且选中项没被 refresh 收窄，详情才有内容）。
-  bool ensureDetailSelection() {
-    final current = _selectedImageId;
-    if (current != null && _imageIndex.containsKey(current)) return true;
-    int? fallback;
-    final viewerId = viewerImage?.id;
-    if (viewerId != null && _imageIndex.containsKey(viewerId)) {
-      fallback = viewerId;
-    } else {
-      for (final item in _imageIndex.values) {
-        if (item.id != null) {
-          fallback = item.id;
-          break;
-        }
-      }
-    }
-    if (fallback == null) return false;
-    // 只动「详情看哪张」，不碰多选集合：用户已经框了一批图时打开详情，
-    // 不该把框选清掉（详情面板自己只读 selectedImage）。
-    _selectedImageId = fallback;
-    _anchorImageId = fallback;
-    notifyListeners();
-    return true;
-  }
-
-  /// 进入视觉库多选模式；给了 id 就顺手把它勾上（长按磁贴走这条路）
-  void enterVisualSelectionMode([int? id]) {
-    _visualSelectionMode = true;
-    if (id != null) {
-      _selectedImageIds.add(id);
-      _selectedImageId = id;
-      _anchorImageId = id;
-    }
-    notifyListeners();
-  }
-
-  void exitVisualSelectionMode() {
-    if (!_visualSelectionMode && _selectedImageIds.isEmpty) return;
-    clearSelection();
-  }
-
-  /// 选中当前列表里的全部图片或视频
-  void selectAllImages() {
-    _visualSelectionMode = true;
-    final ids = _selectableMediaIds;
-    _selectedImageIds
-      ..clear()
-      ..addAll(ids);
-    _anchorImageId = ids.isEmpty ? null : ids.first;
-    notifyListeners();
-  }
 
   /// 批量「从软件移除」：只删库里的媒体行，磁盘文件不动。
   ///
-  /// 返回真正删掉的行数。关联的标签行由外键级联清掉，查看器里对应的
-  /// 条目也一起收起来。
+  /// 返回真正删掉的行数。关联的标签行由外键级联清掉。
   Future<int> deleteMediaByIds(Iterable<int> ids) async {
     final list = ids.toSet().toList();
     if (list.isEmpty) return 0;
-    final paths = await _mediaDao.pathsByIds(list.toSet());
     final deleted = await _mediaDao.deleteByIds(list);
     for (final id in list) {
       _trackTags.remove(id);
       _imageTags.remove(id);
       _selectedTrackIds.remove(id);
-      _selectedImageIds.remove(id);
     }
-    _dropViewerItemsFor(paths);
     if (_selectedTrackIds.isEmpty) _selectionMode = false;
-    if (_selectedImageIds.isEmpty) _visualSelectionMode = false;
-    if (_anchorImageId != null && !_selectedImageIds.contains(_anchorImageId)) {
-      _anchorImageId = null;
-    }
     if (_anchorTrackId != null && !_selectedTrackIds.contains(_anchorTrackId)) {
       _anchorTrackId = null;
     }
@@ -833,46 +661,6 @@ class AppState extends ChangeNotifier {
     return deleted;
   }
 
-  /// 打开查看器 — 传入可导航的图片列表和起始索引
-  ///
-  /// 直接调这里的都是「浏览」：顺手结束上一个阅读会话，避免把浏览的
-  /// 翻页记到某个卷的进度上。阅读模式走 [openVolumeReader]。
-  void openViewer(List<MediaItem> images, int startIndex) {
-    _viewerImages = List<MediaItem>.from(images);
-    _viewerIndex = _viewerImages.isEmpty
-        ? 0
-        : startIndex.clamp(0, _viewerImages.length - 1);
-    _showViewer = true;
-    _syncSelectedToViewer();
-    notifyListeners();
-  }
-
-  void closeViewer() {
-    _showViewer = false;
-    _viewerImages = [];
-    _viewerIndex = 0;
-    notifyListeners();
-  }
-
-  /// 查看器中导航（方向：-1=上一张, 1=下一张）。越界不动。
-  void navigateViewer(int direction) {
-    final newIndex = _viewerIndex + direction;
-    if (newIndex >= 0 && newIndex < _viewerImages.length) {
-      _viewerIndex = newIndex;
-      _syncSelectedToViewer();
-      notifyListeners();
-    }
-  }
-
-  /// 查看器里的当前页同步成单选目标。
-  ///
-  /// 「图片详情」面板读的是 [selectedImage]，不同步的话在大图里翻页时
-  /// 详情仍停在进查看器之前那张图。
-  void _syncSelectedToViewer() {
-    if (_viewerImages.isEmpty) return;
-    final id = _viewerImages[_viewerIndex].id;
-    if (id != null) _selectedImageId = id;
-  }
 
   // ═══════════════ 刷新 / 中间栏加载 ═══════════════
 
@@ -999,24 +787,6 @@ class AppState extends ChangeNotifier {
             '选中集合随上下文收窄: $selectedBefore -> ${_selectedTrackIds.length}');
       }
 
-      final visibleImageIds = <int>{
-        ..._images.map((i) => i.id).whereType<int>(),
-        ..._visibleMediaIds,
-      };
-      final selectedImagesBefore = _selectedImageIds.length;
-      _selectedImageIds.retainAll(visibleImageIds);
-      if (_anchorImageId != null && !visibleImageIds.contains(_anchorImageId)) {
-        _anchorImageId = null;
-      }
-      if (_selectedImageId != null &&
-          !visibleImageIds.contains(_selectedImageId)) {
-        _selectedImageId = null;
-      }
-      if (_selectedImageIds.isEmpty) _visualSelectionMode = false;
-      if (selectedImagesBefore != _selectedImageIds.length) {
-        logInfo('AppState',
-            '图片选中集合随上下文收窄: $selectedImagesBefore -> ${_selectedImageIds.length}');
-      }
       logInfo('AppState',
           'Center loaded: ${_centerFolders.length} folders, ${_tracks.length} tracks, ${_images.length} images');
     } finally {
@@ -1527,7 +1297,6 @@ class AppState extends ChangeNotifier {
     if (victims.isEmpty) return 0;
     final deleted = await _mediaDao.deleteByPaths(victims);
     _trackTags.clear();
-    _dropViewerItemsFor(victims);
     // 媒体行被删了就要推进代数：作品层的 ImageGrid 缓存着查过的列表，
     // 只靠 folderVersion 它不知道该重查，删掉的磁贴会留在界面上。
     if (deleted > 0) _mediaRevision++;
@@ -1549,23 +1318,6 @@ class AppState extends ChangeNotifier {
     }
     final under = await _mediaDao.queryByDirs(removed.toList());
     return under.where((m) => !alive.any((a) => p.isWithin(a, m.path))).length;
-  }
-
-  /// 查看器里正在看的图被删掉时收起来，避免翻到一条已不存在的记录。
-  void _dropViewerItemsFor(List<String> removedPaths) {
-    if (_viewerImages.isEmpty) return;
-    final victims = removedPaths.toSet();
-    final keep =
-        _viewerImages.where((m) => !victims.contains(m.path)).toList();
-    if (keep.length == _viewerImages.length) return;
-    _viewerImages = keep;
-    if (_viewerImages.isEmpty) {
-      _viewerIndex = 0;
-      _showViewer = false;
-    } else if (_viewerIndex >= _viewerImages.length) {
-      _viewerIndex = _viewerImages.length - 1;
-    }
-    notifyListeners();
   }
 
   /// 把文件夹（及其后代）移动到另一作品

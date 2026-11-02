@@ -165,3 +165,29 @@
 
 1. **标题保留策略**：编号在开头时，标题就是剩余部分；编号在中间时，把编号抠掉后合并两侧再压缩连续空格。这样 `[サークル] RJ294126 作品名` 拆成 `[サークル] 作品名`，社团名不丢。
 2. **白名单整段对齐**：`cover10.jpg` 不算白名单形态，只有基名整段等于 `cover` 才算。带序号的图交给强词与目录信号打分，避免把一串 `cover1` 到 `cover20` 全判成封面。
+
+## 2026-11-02 阶段四第一步：拆掉图片查看器与图片选中
+
+### 动作
+
+| 项 | 改动 |
+|---|---|
+| 查看器 | 删 `_viewerImages`、`_viewerIndex`、`_showViewer`、`openViewer`、`closeViewer`、`navigateViewer`、`_syncSelectedToViewer`、`_dropViewerItemsFor` |
+| 图片选中 | 删 `_selectedImageId`、`_selectedImageIds`、`_anchorImageId`、`selectImage`、`toggleSelect`、`rangeSelect`、`clearSelection`、`selectAllImages`、`ensureDetailSelection`、`enterVisualSelectionMode`、`exitVisualSelectionMode`、`selectedId`、`selectedImage`、`selectedIds`、`isSelected`、`visualSelectionMode` |
+| 可见项登记 | 删 `_visibleMediaIds`、`reportVisibleMedia`、`_selectableMediaIds`，这套只服务已删除的网格 |
+| 工具条 | `lib/pages/home_page.dart` 的多选按钮改走曲目接口：`selectionMode`、`enterTrackSelectionMode`、`clearTrackSelection` |
+| 测试 | `test/state/app_state_delete_test.dart` 去掉查看器断言；`test/state/app_state_tag_admin_test.dart` 两条图片批量用例改写成曲目批量用例 |
+
+`lib/state/app_state.dart` 从 3202 行降到 2954 行。
+
+### 为什么先拆这一块
+
+图片查看器与图片选中已经没有界面在用，留着只会让阶段四的拆分对象与调用关系更难看清。曲目多选用的是另一套 `_selectedTrackIds`，不受影响。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze --no-fatal-infos` | 无问题 |
+| `flutter test` | 559 例全过 |
+| `NO_XIPH_LIBS=1 flutter build linux --release` | 成功 |
