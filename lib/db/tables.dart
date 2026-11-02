@@ -20,6 +20,8 @@ class Tables {
       name        TEXT    NOT NULL,
       library     TEXT    NOT NULL CHECK (library IN ('audio', 'media')),
       cover_path  TEXT,
+      -- 作品对应的磁盘目录：刷新与自动导入靠它把目录和作品对上，见设计备忘 §3
+      root_path   TEXT,
       sort_order  INTEGER NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL
     )
@@ -202,6 +204,29 @@ class Tables {
     )
     ''',
     'CREATE INDEX IF NOT EXISTS idx_work_metadata_rj ON work_metadata(rj_code)',
+    'CREATE INDEX IF NOT EXISTS idx_works_root_path ON works(root_path)',
+
+    // 创作者：声优、画师、剧本、音乐、社团都放一张表，角色记在关联行上
+    '''
+    CREATE TABLE creators (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      name      TEXT    NOT NULL,
+      dlsite_id TEXT    UNIQUE,
+      kind      TEXT
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_creators_name ON creators(name)',
+
+    // 作品↔创作者 多对多：同一部作品可以有多个声优，也可以既有声优又有画师
+    '''
+    CREATE TABLE work_creators (
+      work_id    INTEGER NOT NULL REFERENCES works(id)    ON DELETE CASCADE,
+      creator_id INTEGER NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      role       TEXT    NOT NULL DEFAULT 'other',
+      PRIMARY KEY (work_id, creator_id, role)
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_work_creators_creator ON work_creators(creator_id)',
 
     // 过渡视图：只读，老查询按 tracks 读，写入一律走 MediaDao。
     'CREATE VIEW IF NOT EXISTS tracks AS '
