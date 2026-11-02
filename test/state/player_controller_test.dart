@@ -14,6 +14,32 @@ TrackItem item(int i) => TrackItem(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  group('追加队列', () {
+    test('往尾部追加不打断当前曲目', () async {
+      final player = PlayerController();
+      player.debugSeedQueue(List.generate(3, item), startIndex: 1);
+      final current = player.currentTrack;
+      await player.enqueue([item(9)]);
+      expect(player.queueLength, 4);
+      expect(player.currentTrack, current);
+      expect(player.queue.last.id, 9);
+    });
+
+    test('空队列追加等价于从第一首开始播', () async {
+      final player = PlayerController();
+      await player.enqueue([item(1), item(2)]);
+      expect(player.queueLength, 2);
+      expect(player.index, 0);
+    });
+
+    test('追加空列表什么也不做', () async {
+      final player = PlayerController();
+      player.debugSeedQueue([item(1)]);
+      await player.enqueue(const []);
+      expect(player.queueLength, 1);
+    });
+  });
+
   group('洗牌队列（第 24.1 项）', () {
     test('一轮内不重复，走完重开一轮', () async {
       final player = PlayerController();

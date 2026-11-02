@@ -144,6 +144,22 @@ class PlayerController extends ChangeNotifier {
     await _loadAndPlay();
   }
 
+  /// 往队列尾部追加，不打断正在播的那首。队列为空时等价于从头播放。
+  Future<void> enqueue(List<TrackItem> tracks) async {
+    if (tracks.isEmpty) return;
+    if (_queue.isEmpty) {
+      _queue = List.from(tracks);
+      _index = 0;
+      if (_shuffle) _rebuildOrder();
+      await _loadAndPlay();
+      return;
+    }
+    _queue.addAll(tracks);
+    // 洗牌顺序按新长度重建，但要保住当前曲目仍在最前，否则追加会打乱正在播的队列。
+    if (_shuffle) _rebuildOrder();
+    notifyListeners();
+  }
+
   Future<void> _loadAndPlay() async {
     if (!_initialized) {
       // 未初始化时不触碰原生引擎，只同步队列状态。

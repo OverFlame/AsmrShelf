@@ -72,6 +72,12 @@ class PlaybackState extends ChangeNotifier {
     await player.playQueue(tracks, startIndex: index);
   }
 
+  /// 把曲目追加到当前队列尾部，不打断正在播放的这首。
+  Future<void> enqueueTracks(List<TrackItem> tracks) async {
+    _rememberQueueCover();
+    await player.enqueue(tracks);
+  }
+
   /// 最近播放跨作品，没有单一来源封面，回退到每首曲目自己的封面。
   Future<void> playRecent(int startIndex) async {
     if (recentTracks.isEmpty) return;

@@ -1860,6 +1860,10 @@ class AppState extends ChangeNotifier {
 
   Future<void> playAllCurrent() => playback.playAllCurrent();
 
+  /// 把曲目追加进当前播放队列（作品详情的「加入队列」）。
+  Future<void> addToPlayQueue(List<TrackItem> tracks) =>
+      playback.enqueueTracks(tracks);
+
   /// 播放某个文件夹（含子文件夹）下的全部曲目
   Future<void> playFolderAll(int folderId) async {
     final paths = <String>[];

@@ -539,6 +539,41 @@ class _WorkHeader extends StatelessWidget {
                                 fontSize: 12,
                                 color: AppColors.mutedLightOf(context))),
                       ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          _headerAction(
+                            context,
+                            key: const ValueKey('work-edit-cover'),
+                            icon: Icons.image_outlined,
+                            label: '编辑封面',
+                            onPressed: () =>
+                                showImportCoverDialog(context, work.id!),
+                          ),
+                          _headerAction(
+                            context,
+                            key: const ValueKey('work-add-to-queue'),
+                            icon: Icons.queue_music,
+                            label: '加入队列',
+                            onPressed: appState.tracks.isEmpty
+                                ? null
+                                : () async {
+                                    await appState
+                                        .addToPlayQueue(appState.tracks);
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                          content: Text(
+                                              '已加入 ${appState.tracks.length} 首')),
+                                    );
+                                  },
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -555,6 +590,26 @@ class _WorkHeader extends StatelessWidget {
             ],
           ),
         );
+  }
+
+  Widget _headerAction(
+    BuildContext context, {
+    required Key key,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onPressed,
+  }) {
+    return OutlinedButton.icon(
+      key: key,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 15),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        minimumSize: const Size(0, 30),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
   }
 
   void _showDescription(BuildContext context, String title, String text) {
