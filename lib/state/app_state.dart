@@ -15,7 +15,9 @@ import '../db/work_dao.dart';
 import '../services/cover_service.dart';
 import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
+import '../services/import_scanner.dart';
 import '../services/import_service.dart';
+import '../services/plan_importer.dart';
 import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
@@ -1534,6 +1536,34 @@ class AppState extends ChangeNotifier {
   }
 
   /// 导入目录到指定作品（合并）
+  /// 从一个根目录一次性导入多部作品（每部作品一个子目录）。
+  ///
+  /// 只扫描不落库，给界面先弹预览用。
+  Future<ImportPlan> scanWorksRoot(String rootPath, {bool nested = false}) =>
+      scanImportTree(rootPath, nested: nested);
+
+  /// 执行一次性导入：落库后刷新列表。
+  ///
+  /// 与普通导入共用 [_beginImport] 的互斥标志，避免和扫描任务同时改库。
+  Future<ImportOutcome?> importWorksFromRoot(
+    String rootPath, {
+    bool nested = false,
+  }) async {
+    if (!_beginImport('importWorksFromRoot')) return null;
+    try {
+      final plan = await scanImportTree(rootPath, nested: nested);
+      final outcome =
+          await PlanImporter(DatabaseManager.instance.db).apply(plan);
+      logInfo('AppState',
+          '一次性导入：作品 ${outcome.worksCreated} 新建 / ${outcome.worksSkipped} 跳过，'
+          '曲目 ${outcome.tracksInserted} 新增 / ${outcome.tracksSkipped} 已存在');
+      await refresh();
+      return outcome;
+    } finally {
+      _endImport();
+    }
+  }
+
   Future<void> importDirectoryIntoWork(String dirPath, int workId) async {
     if (!_beginImport('importDirectoryIntoWork')) return;
     try {

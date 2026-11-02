@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/import_scanner.dart';
 import '../services/thumbnail_cache.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -46,6 +47,12 @@ class _HomePageState extends State<HomePage> {
             actions: [
               if (isWide)
                 SizedBox(width: 220, child: _searchField(appState)),
+              IconButton(
+                key: const ValueKey('home-import-works'),
+                icon: const Icon(Icons.library_add_outlined),
+                tooltip: '从目录导入作品',
+                onPressed: () => _importWorks(context),
+              ),
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: '设置',
@@ -130,6 +137,56 @@ class _HomePageState extends State<HomePage> {
         onChanged: appState.setSearchQuery,
       ),
     );
+  }
+  /// 选一个根目录，把里面每部作品一次导进来。
+  ///
+  /// 先扫描再让用户确认数量，避免选错目录直接往库里灌几百部作品。
+  Future<void> _importWorks(BuildContext context) async {
+    final appState = context.read<AppState>();
+    final root = await pickDirectory(title: '选择作品根目录（每部作品一个子文件夹）');
+    if (root == null || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+
+    messenger.showSnackBar(const SnackBar(
+      content: Text('正在扫描目录…'),
+      duration: Duration(minutes: 1),
+    ));
+    ImportPlan plan;
+    try {
+      plan = await appState.scanWorksRoot(root);
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('扫描失败：$e')));
+      return;
+    }
+    messenger.hideCurrentSnackBar();
+    if (!context.mounted) return;
+
+    if (plan.works.isEmpty) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('这个目录下没有找到带音频的作品目录')));
+      return;
+    }
+    final tracks = plan.works.fold<int>(0, (n, w) => n + w.tracks.length);
+    final ok = await confirmDialog(
+      context,
+      title: '导入 ${plan.works.length} 部作品？',
+      content: '共 $tracks 首曲目。已经导入过的作品会跳过，不会重复建。',
+      okLabel: '导入',
+    );
+    if (ok != true || !context.mounted) return;
+
+    final outcome = await appState.importWorksFromRoot(root);
+    if (!context.mounted) return;
+    if (outcome == null) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('另一个导入任务正在进行，稍后再试')));
+      return;
+    }
+    messenger.showSnackBar(SnackBar(
+      content: Text('导入完成：作品 ${outcome.worksCreated} 新建 / '
+          '${outcome.worksSkipped} 跳过，曲目 ${outcome.tracksInserted} 首'),
+    ));
   }
 }
 
