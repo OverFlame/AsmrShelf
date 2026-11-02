@@ -75,6 +75,12 @@ void main() {
     expect(find.textContaining('点 DLsite 可以补全'), findsOneWidget);
   });
 
+  testWidgets('作品层工具条有找封面与 DLsite 两个入口', (tester) async {
+    await pump(tester);
+    expect(find.byKey(const ValueKey('track-find-cover')), findsOneWidget);
+    expect(find.byKey(const ValueKey('track-fetch-dlsite')), findsOneWidget);
+  });
+
   testWidgets('抓过之后显示社团、系列、编号与简介', (tester) async {
     await tester.runAsync(() => WorkMetadataDao(db).upsert(WorkMetadata(
       workId: workId,

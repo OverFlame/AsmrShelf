@@ -6,13 +6,11 @@ import 'package:provider/provider.dart';
 import '../services/import_scanner.dart';
 import '../services/settings_service.dart';
 import '../services/thumbnail_cache.dart';
-import '../services/dlsite/dlsite_cover.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/dialogs.dart' show confirmDialog, pickDirectory;
 import '../widgets/filter_dialog.dart';
-import '../widgets/dlsite_preview_dialog.dart';
 import '../widgets/folder_browser.dart';
 import '../widgets/player_bar.dart';
 import '../widgets/split_handle.dart';
@@ -37,8 +35,9 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   /// 左栏宽度的当前显示值。拖动时只改这个，松手才写进设置。
-  final ValueNotifier<double> _leftWidth =
-      ValueNotifier<double>(SettingsService.defaultLeftWidth);
+  final ValueNotifier<double> _leftWidth = ValueNotifier<double>(
+    SettingsService.defaultLeftWidth,
+  );
   AppState? _appState;
   bool _draggingLeft = false;
 
@@ -76,12 +75,13 @@ class _HomePageState extends State<HomePage> {
         Scaffold(
           appBar: AppBar(
             title: isWide
-                ? const Text('AsmrShelf',
-                    style: TextStyle(fontWeight: FontWeight.bold))
+                ? const Text(
+                    'AsmrShelf',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  )
                 : _searchField(appState),
             actions: [
-              if (isWide)
-                SizedBox(width: 220, child: _searchField(appState)),
+              if (isWide) SizedBox(width: 220, child: _searchField(appState)),
               IconButton(
                 key: const ValueKey('home-import-works'),
                 icon: const Icon(Icons.library_add_outlined),
@@ -91,14 +91,16 @@ class _HomePageState extends State<HomePage> {
               IconButton(
                 icon: const Icon(Icons.settings_outlined),
                 tooltip: '设置',
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
               ),
             ],
           ),
           drawer: isWide ? null : _buildDrawer(),
-          body: isWide ? _buildWideBody(appState) : _buildCenter(appState, isWide),
+          body: isWide
+              ? _buildWideBody(appState)
+              : _buildCenter(appState, isWide),
           bottomNavigationBar: const PlayerBar(),
         ),
         if (appState.backfillingThumbs)
@@ -120,8 +122,7 @@ class _HomePageState extends State<HomePage> {
         return ValueListenableBuilder<double>(
           valueListenable: _leftWidth,
           builder: (context, stored, center) {
-            final width = stored.clamp(
-                SettingsService.minLeftWidth, maxLeft);
+            final width = stored.clamp(SettingsService.minLeftWidth, maxLeft);
             return Row(
               children: [
                 SizedBox(
@@ -136,8 +137,10 @@ class _HomePageState extends State<HomePage> {
                   axis: Axis.horizontal,
                   onDragDelta: (delta) {
                     _draggingLeft = true;
-                    _leftWidth.value = (_leftWidth.value + delta)
-                        .clamp(SettingsService.minLeftWidth, maxLeft);
+                    _leftWidth.value = (_leftWidth.value + delta).clamp(
+                      SettingsService.minLeftWidth,
+                      maxLeft,
+                    );
                   },
                   onDragEnd: () {
                     _draggingLeft = false;
@@ -163,9 +166,9 @@ class _HomePageState extends State<HomePage> {
     const minCenterWidth = 420.0;
     final byWindow = totalWidth - minCenterWidth - 8;
     return math.max(
-        SettingsService.minLeftWidth,
-        math.min(
-            SettingsService.maxLeftWidth, byWindow));
+      SettingsService.minLeftWidth,
+      math.min(SettingsService.maxLeftWidth, byWindow),
+    );
   }
 
   // ── 左栏：标签面板 ──
@@ -178,8 +181,8 @@ class _HomePageState extends State<HomePage> {
       width: 290,
       child: SafeArea(
         child: Builder(
-          builder: (drawerCtx) => _buildLeftPanel(
-              onNavigate: () => Navigator.of(drawerCtx).pop()),
+          builder: (drawerCtx) =>
+              _buildLeftPanel(onNavigate: () => Navigator.of(drawerCtx).pop()),
         ),
       ),
     );
@@ -189,7 +192,8 @@ class _HomePageState extends State<HomePage> {
   Widget _buildCenter(AppState appState, bool isWide) {
     if (appState.loading) {
       return const Center(
-          child: CircularProgressIndicator(color: AppColors.accent));
+        child: CircularProgressIndicator(color: AppColors.accent),
+      );
     }
     if (appState.currentWork != null) return const FolderBrowser();
     return Column(
@@ -218,6 +222,7 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
   /// 选一个根目录，把里面每部作品一次导进来。
   ///
   /// 先扫描再让用户确认数量，避免选错目录直接往库里灌几百部作品。
@@ -227,10 +232,9 @@ class _HomePageState extends State<HomePage> {
     if (root == null || !context.mounted) return;
     final messenger = ScaffoldMessenger.of(context);
 
-    messenger.showSnackBar(const SnackBar(
-      content: Text('正在扫描目录…'),
-      duration: Duration(minutes: 1),
-    ));
+    messenger.showSnackBar(
+      const SnackBar(content: Text('正在扫描目录…'), duration: Duration(minutes: 1)),
+    );
     ImportPlan plan;
     try {
       plan = await appState.scanWorksRoot(root);
@@ -243,8 +247,9 @@ class _HomePageState extends State<HomePage> {
     if (!context.mounted) return;
 
     if (plan.works.isEmpty) {
-      messenger.showSnackBar(const SnackBar(
-          content: Text('这个目录下没有找到带音频的作品目录')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('这个目录下没有找到带音频的作品目录')),
+      );
       return;
     }
     final tracks = plan.works.fold<int>(0, (n, w) => n + w.tracks.length);
@@ -259,14 +264,17 @@ class _HomePageState extends State<HomePage> {
     final outcome = await appState.importWorksFromRoot(root);
     if (!context.mounted) return;
     if (outcome == null) {
-      messenger.showSnackBar(
-          const SnackBar(content: Text('另一个导入任务正在进行，稍后再试')));
+      messenger.showSnackBar(const SnackBar(content: Text('另一个导入任务正在进行，稍后再试')));
       return;
     }
-    messenger.showSnackBar(SnackBar(
-      content: Text('导入完成：作品 ${outcome.worksCreated} 新建 / '
-          '${outcome.worksSkipped} 跳过，曲目 ${outcome.tracksInserted} 首'),
-    ));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          '导入完成：作品 ${outcome.worksCreated} 新建 / '
+          '${outcome.worksSkipped} 跳过，曲目 ${outcome.tracksInserted} 首',
+        ),
+      ),
+    );
   }
 }
 
@@ -350,9 +358,9 @@ class _VisualToolbar extends StatelessWidget {
                 itemBuilder: (_) => [
                   for (var c = 2; c <= 10; c++)
                     PopupMenuItem(
-                        value: c,
-                        child:
-                            Text('$c 列', style: const TextStyle(fontSize: 13))),
+                      value: c,
+                      child: Text('$c 列', style: const TextStyle(fontSize: 13)),
+                    ),
                 ],
               ),
               if (!compact)
@@ -434,38 +442,27 @@ class _VisualToolbar extends StatelessWidget {
                   icon: const Icon(Icons.create_new_folder_outlined, size: 18),
                   onPressed: () => _addFolderToWork(context),
                 ),
-              if (!compact && appState.currentWork != null)
-                IconButton(
-                  key: ValueKey('audio-toolbar-find-cover'),
-                  tooltip: '从文件里找封面',
-                  icon: const Icon(Icons.image_search_outlined, size: 18),
-                  onPressed: () => _findLocalCover(context),
-                ),
-              if (!compact && appState.currentWork != null)
-                IconButton(
-                  key: ValueKey('audio-toolbar-dlsite'),
-                  tooltip: '抓取 DLsite 元数据',
-                  icon: const Icon(Icons.cloud_download_outlined, size: 18),
-                  onPressed: () => _fetchDlsite(context),
-                ),
               if (!compact) ...[
                 IconButton(
                   key: ValueKey('audio-toolbar-tags'),
                   tooltip: '标签筛选',
-                  icon: Icon(Icons.label_outline,
-                      size: 18,
-                      color: appState.activeTagIds.isEmpty
-                          ? null
-                          : AppColors.accent),
+                  icon: Icon(
+                    Icons.label_outline,
+                    size: 18,
+                    color: appState.activeTagIds.isEmpty
+                        ? null
+                        : AppColors.accent,
+                  ),
                   onPressed: () => _showTagFilter(context),
                 ),
                 IconButton(
                   key: ValueKey('audio-toolbar-advanced-filter'),
                   tooltip: '高级筛选',
-                  icon: Icon(Icons.filter_alt_outlined,
-                      size: 18,
-                      color:
-                          appState.hasAdvancedFilter ? AppColors.accent : null),
+                  icon: Icon(
+                    Icons.filter_alt_outlined,
+                    size: 18,
+                    color: appState.hasAdvancedFilter ? AppColors.accent : null,
+                  ),
                   onPressed: () => AdvancedFilterDialog.show(context),
                 ),
               ],
@@ -524,49 +521,46 @@ class _VisualToolbar extends StatelessWidget {
                       const PopupMenuDivider(),
                     ],
                     PopupMenuItem(
-                        key: ValueKey('audio-toolbar-refresh'),
-                        value: 'refresh',
-                        child: const Text('刷新',
-                            style: TextStyle(fontSize: 13))),
+                      key: ValueKey('audio-toolbar-refresh'),
+                      value: 'refresh',
+                      child: const Text('刷新', style: TextStyle(fontSize: 13)),
+                    ),
                     PopupMenuItem(
-                        key: ValueKey('audio-toolbar-clear-thumbs'),
-                        value: 'clearThumbs',
-                        child: const Text('清理缩略图缓存',
-                            style: TextStyle(fontSize: 13))),
+                      key: ValueKey('audio-toolbar-clear-thumbs'),
+                      value: 'clearThumbs',
+                      child: const Text(
+                        '清理缩略图缓存',
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
                     PopupMenuItem(
-                        key: ValueKey('audio-toolbar-tags'),
-                        value: 'tags',
-                        child: const Text('标签筛选',
-                            style: TextStyle(fontSize: 13))),
+                      key: ValueKey('audio-toolbar-tags'),
+                      value: 'tags',
+                      child: const Text('标签筛选', style: TextStyle(fontSize: 13)),
+                    ),
                     PopupMenuItem(
-                        key: ValueKey('audio-toolbar-advanced-filter'),
-                        value: 'advancedFilter',
-                        child: const Text('高级筛选',
-                            style: TextStyle(fontSize: 13))),
+                      key: ValueKey('audio-toolbar-advanced-filter'),
+                      value: 'advancedFilter',
+                      child: const Text('高级筛选', style: TextStyle(fontSize: 13)),
+                    ),
                     if (appState.currentFolderPath != null)
                       PopupMenuItem(
-                          key: ValueKey('audio-toolbar-play-all'),
-                          value: 'playAll',
-                          child: const Text('播放本目录的音频',
-                              style: TextStyle(fontSize: 13))),
+                        key: ValueKey('audio-toolbar-play-all'),
+                        value: 'playAll',
+                        child: const Text(
+                          '播放本目录的音频',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ),
                     if (appState.currentWork != null)
                       PopupMenuItem(
-                          key: ValueKey('audio-toolbar-add-folder'),
-                          value: 'addFolder',
-                          child: const Text('添加文件夹到本作品',
-                              style: TextStyle(fontSize: 13))),
-                    if (appState.currentWork != null)
-                      PopupMenuItem(
-                          key: ValueKey('audio-toolbar-find-cover'),
-                          value: 'findCover',
-                          child: const Text('从文件里找封面',
-                              style: TextStyle(fontSize: 13))),
-                    if (appState.currentWork != null)
-                      PopupMenuItem(
-                          key: ValueKey('audio-toolbar-dlsite'),
-                          value: 'dlsite',
-                          child: const Text('抓取 DLsite 元数据',
-                              style: TextStyle(fontSize: 13))),
+                        key: ValueKey('audio-toolbar-add-folder'),
+                        value: 'addFolder',
+                        child: const Text(
+                          '添加文件夹到本作品',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ),
                   ],
                 ),
               const SizedBox(width: 4),
@@ -581,17 +575,20 @@ class _VisualToolbar extends StatelessWidget {
   ///
   /// 只查库查不出用户新拷进来的文件，也删不掉已经删掉的文件，所以这里走
   /// `rescanFromDisk`；批量扫盘放在按钮回调里，不挂在每次界面刷新上。
-  Future<void> _refreshFromDisk(
-      BuildContext context, AppState appState) async {
+  Future<void> _refreshFromDisk(BuildContext context, AppState appState) async {
     final messenger = ScaffoldMessenger.of(context);
     final outcome = await appState.rescanFromDisk();
     await appState.refresh();
     if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(
-      content: Text(outcome.changed
-          ? '已按磁盘刷新：新增 ${outcome.added} 首，清理 ${outcome.removed} 首'
-          : '没有发现新文件，也没有失联的曲目'),
-    ));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          outcome.changed
+              ? '已按磁盘刷新：新增 ${outcome.added} 首，清理 ${outcome.removed} 首'
+              : '没有发现新文件，也没有失联的曲目',
+        ),
+      ),
+    );
   }
 
   void _onMore(BuildContext context, String action) {
@@ -622,12 +619,6 @@ class _VisualToolbar extends StatelessWidget {
       case 'addFolder':
         _addFolderToWork(context);
         break;
-      case 'findCover':
-        _findLocalCover(context);
-        break;
-      case 'dlsite':
-        _fetchDlsite(context);
-        break;
       default:
         // 极窄时排序项挂在「更多」里，值形如 sort:name
         if (action.startsWith('sort:')) {
@@ -651,61 +642,6 @@ class _VisualToolbar extends StatelessWidget {
   }
 
   /// 把磁盘上的一个文件夹补进当前作品：图片、视频、音频一次都收。
-  /// 从作品目录里挑一张图当封面并写盘。
-  Future<void> _findLocalCover(BuildContext context) async {
-    final appState = context.read<AppState>();
-    final workId = appState.currentWork?.id;
-    if (workId == null) return;
-    final messenger = ScaffoldMessenger.of(context);
-    final message = await appState.findLocalCoverForWork(workId);
-    if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(content: Text(message ?? '封面已写入作品目录')));
-  }
-
-  /// 按作品目录名里的编号抓一次 DLsite 元数据。
-  ///
-  /// 抓不到时把原因原样弹给用户（没有编号、被限制、网络不通），不做静默失败。
-  Future<void> _fetchDlsite(BuildContext context) async {
-    final appState = context.read<AppState>();
-    final workId = appState.currentWork?.id;
-    if (workId == null) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(const SnackBar(
-      content: Text('正在抓取 DLsite 元数据…'),
-      duration: Duration(minutes: 1),
-    ));
-    final result = await appState.previewDlsiteMetadata(workId);
-    messenger.hideCurrentSnackBar();
-    if (!context.mounted) return;
-    final work = result.work;
-    if (work == null) {
-      messenger.showSnackBar(SnackBar(content: Text(result.message)));
-      return;
-    }
-    final choice = await showDlsitePreviewDialog(context,
-        work: work, fromCache: result.fromCache);
-    if (choice == null || !context.mounted) return;
-    final applied = await appState.applyDlsiteMetadata(
-      workId,
-      work,
-      applyCover: choice.applyCover,
-    );
-    var coverNote = '';
-    if (choice.applyCover && work.cover != null) {
-      try {
-        await appState.downloadDlsiteCover(workId, work.cover!.url);
-      } on DlsiteImageException catch (e) {
-        coverNote = '；封面没换：${e.message}';
-      }
-    }
-    if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(
-      content: Text('已应用 ${work.workNo} 的元数据'
-          '${applied.grantedTags > 0 ? '，新增 ${applied.grantedTags} 个标签' : ''}'
-          '$coverNote'),
-    ));
-  }
-
   Future<void> _addFolderToWork(BuildContext context) async {
     final appState = context.read<AppState>();
     final workId = appState.currentWork?.id;
@@ -736,14 +672,16 @@ class _VisualToolbar extends StatelessWidget {
       content: '删除本机已生成的缩略图文件，之后浏览会重新生成。',
     );
     if (ok != true) return;
-    final removed = await ThumbnailService.instance.evictDiskCache(maxSizeMB: 0);
+    final removed = await ThumbnailService.instance.evictDiskCache(
+      maxSizeMB: 0,
+    );
     ThumbnailService.instance.clearMemoryCache();
     // 自增 thumbEpoch，网格里的卡片据此丢弃旧缩略图并重建
     appState.markThumbnailsCleared();
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已清理 $removed 个缩略图缓存文件')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已清理 $removed 个缩略图缓存文件')));
   }
 }
 
@@ -762,11 +700,14 @@ class _RecentBar extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Text('最近播放',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimaryOf(context))),
+            child: Text(
+              '最近播放',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimaryOf(context),
+              ),
+            ),
           ),
           Expanded(
             child: ListView.builder(
@@ -785,18 +726,20 @@ class _RecentBar extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           CoverImage(
-                              path: t.coverPath,
-                              width: 72,
-                              height: 72,
-                              borderRadius: 8),
+                            path: t.coverPath,
+                            width: 72,
+                            height: 72,
+                            borderRadius: 8,
+                          ),
                           const SizedBox(height: 4),
                           Text(
                             t.filename,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textSecondaryOf(context)),
+                              fontSize: 11,
+                              color: AppColors.textSecondaryOf(context),
+                            ),
                           ),
                         ],
                       ),

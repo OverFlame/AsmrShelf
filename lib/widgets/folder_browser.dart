@@ -15,6 +15,7 @@ import 'launch_result_snack.dart';
 import 'scan_access_snack.dart';
 import 'subtitle_assign_dialog.dart';
 import 'tag_picker_dialog.dart';
+import 'work_actions.dart';
 
 /// 中间栏：作品/文件夹浏览（面包屑 + 子文件夹 + 曲目列表）
 class FolderBrowser extends StatelessWidget {
@@ -51,7 +52,11 @@ class FolderBrowser extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            icon: Icon(Icons.arrow_back, size: 18, color: AppColors.mutedLightOf(context)),
+            icon: Icon(
+              Icons.arrow_back,
+              size: 18,
+              color: AppColors.mutedLightOf(context),
+            ),
             tooltip: '返回上一级',
             onPressed: () => appState.goUp(),
           ),
@@ -63,13 +68,19 @@ class FolderBrowser extends StatelessWidget {
                   if (i > 0)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Icon(Icons.chevron_right,
-                          size: 16, color: AppColors.mutedOf(context)),
+                      child: Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: AppColors.mutedOf(context),
+                      ),
                     ),
                   InkWell(
                     onTap: () => _onCrumbTap(appState, crumbs[i]),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 10,
+                      ),
                       child: Text(
                         crumbs[i].name,
                         style: TextStyle(
@@ -140,7 +151,10 @@ class FolderBrowser extends StatelessWidget {
                 key: key,
                 onPressed: onPressed,
                 icon: Icon(icon, size: 15),
-                label: Text(label, style: TextStyle(fontSize: 12, color: color)),
+                label: Text(
+                  label,
+                  style: TextStyle(fontSize: 12, color: color),
+                ),
               );
             }
             return IconButton(
@@ -198,15 +212,22 @@ class FolderBrowser extends StatelessWidget {
             // 再窄也只是滚动，不会把入口裁掉。
             return Row(
               children: [
-                Text(tight ? '$count 首' : '已选 $count 首',
-                    style: TextStyle(
-                        color: AppColors.textPrimaryOf(context), fontSize: 12)),
+                Text(
+                  tight ? '$count 首' : '已选 $count 首',
+                  style: TextStyle(
+                    color: AppColors.textPrimaryOf(context),
+                    fontSize: 12,
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     reverse: true,
-                    child: Row(mainAxisSize: MainAxisSize.min, children: actions),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: actions,
+                    ),
                   ),
                 ),
               ],
@@ -219,9 +240,11 @@ class FolderBrowser extends StatelessWidget {
                 IconButton(
                   key: const ValueKey('track-play-all'),
                   tooltip: isWorkLevel ? '播放全部' : '播放本文件夹',
-                  icon: Icon(Icons.play_arrow,
-                      size: 22,
-                      color: appState.tracks.isEmpty ? null : AppColors.accent),
+                  icon: Icon(
+                    Icons.play_arrow,
+                    size: 22,
+                    color: appState.tracks.isEmpty ? null : AppColors.accent,
+                  ),
                   onPressed: appState.tracks.isEmpty
                       ? null
                       : () => appState.playAllCurrent(),
@@ -250,7 +273,10 @@ class FolderBrowser extends StatelessWidget {
                         ? null
                         : () => _addFolderToWork(context, appState),
                     tooltip: '添加文件夹到本作品',
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 20),
+                    icon: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 20,
+                    ),
                     style: iconStyle,
                   )
                 else
@@ -259,14 +285,37 @@ class FolderBrowser extends StatelessWidget {
                     onPressed: appState.importing
                         ? null
                         : () => _addFolderToWork(context, appState),
-                    icon: const Icon(Icons.create_new_folder_outlined, size: 15),
+                    icon: const Icon(
+                      Icons.create_new_folder_outlined,
+                      size: 15,
+                    ),
                     label: const Text('添加文件夹到本作品'),
                   ),
+                // 作品级的两个动作放在这里：首页工具条只在「没进作品」时渲染，
+                // 放在那边条件互斥，按钮永远点不到。
+                IconButton(
+                  key: const ValueKey('track-find-cover'),
+                  tooltip: '从文件里找封面',
+                  icon: const Icon(Icons.image_search_outlined, size: 20),
+                  onPressed: () => findLocalCoverForCurrentWork(context),
+                  style: iconStyle,
+                ),
+                IconButton(
+                  key: const ValueKey('track-fetch-dlsite'),
+                  tooltip: '抓取 DLsite 元数据',
+                  icon: const Icon(Icons.cloud_download_outlined, size: 20),
+                  onPressed: () => fetchDlsiteForCurrentWork(context),
+                  style: iconStyle,
+                ),
               ],
               const Spacer(),
-              Text('${appState.tracks.length} 首',
-                  style: TextStyle(
-                      color: AppColors.mutedLightOf(context), fontSize: 12)),
+              Text(
+                '${appState.tracks.length} 首',
+                style: TextStyle(
+                  color: AppColors.mutedLightOf(context),
+                  fontSize: 12,
+                ),
+              ),
               const SizedBox(width: 4),
               IconButton(
                 key: const ValueKey('track-toolbar-select'),
@@ -294,8 +343,9 @@ class FolderBrowser extends StatelessWidget {
     // 导入的调用方是按钮回调，没有错误边界：失败原因只能在这里弹出来。
     final err = appState.importError;
     if (err != null && context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('导入失败：$err')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败：$err')));
     }
   }
 
@@ -304,8 +354,11 @@ class FolderBrowser extends StatelessWidget {
     if (ids.isEmpty) return;
     final existing = await appState.getTagIdsOnTracks(ids);
     if (!context.mounted) return;
-    final tags = await showTagPickerDialog(context,
-        title: '为选中曲目添加标签', selectedTagIds: existing);
+    final tags = await showTagPickerDialog(
+      context,
+      title: '为选中曲目添加标签',
+      selectedTagIds: existing,
+    );
     if (tags == null) return;
     await appState.addTagsToTracks(ids, tags);
     appState.clearTrackSelection();
@@ -316,8 +369,11 @@ class FolderBrowser extends StatelessWidget {
     if (ids.isEmpty) return;
     final existing = await appState.getTagIdsOnTracks(ids);
     if (!context.mounted) return;
-    final tags = await showTagPickerDialog(context,
-        title: '移除选中曲目的标签', filterTagIds: existing);
+    final tags = await showTagPickerDialog(
+      context,
+      title: '移除选中曲目的标签',
+      filterTagIds: existing,
+    );
     if (tags == null) return;
     await appState.removeTagsFromTracks(ids, tags);
     appState.clearTrackSelection();
@@ -325,7 +381,9 @@ class FolderBrowser extends StatelessWidget {
 
   /// 从软件移除选中曲目的记录：只删库里的行，磁盘文件保持原样。
   Future<void> _batchRemoveRecords(
-      BuildContext context, AppState appState) async {
+    BuildContext context,
+    AppState appState,
+  ) async {
     final ids = appState.selectedTrackIds.toList();
     if (ids.isEmpty) return;
     final ok = await showDialog<bool>(
@@ -333,18 +391,18 @@ class FolderBrowser extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('移除记录'),
         content: Text(
-            '从软件里移除选中的 ${ids.length} 首？\n'
-            '磁盘上的文件不会被删除，标签关联会一起解除。',
-            style: TextStyle(
-                color: AppColors.textSecondaryOf(ctx), fontSize: 13)),
+          '从软件里移除选中的 ${ids.length} 首？\n'
+          '磁盘上的文件不会被删除，标签关联会一起解除。',
+          style: TextStyle(color: AppColors.textSecondaryOf(ctx), fontSize: 13),
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('移除', style: TextStyle(color: AppColors.danger)),
+            child: const Text('移除', style: TextStyle(color: AppColors.danger)),
           ),
         ],
       ),
@@ -352,8 +410,9 @@ class FolderBrowser extends StatelessWidget {
     if (ok != true) return;
     final deleted = await appState.deleteMediaByIds(ids);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已移除 $deleted 条记录，磁盘文件未改动')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已移除 $deleted 条记录，磁盘文件未改动')));
   }
 
   Widget _sortMenu(BuildContext context, AppState appState) {
@@ -416,7 +475,9 @@ class FolderBrowser extends StatelessWidget {
               child: Text(
                 appState.currentFolderId == null ? '该作品暂无内容' : '该文件夹为空',
                 style: TextStyle(
-                    color: AppColors.mutedLightOf(context), fontSize: 13),
+                  color: AppColors.mutedLightOf(context),
+                  fontSize: 13,
+                ),
               ),
             ),
           ),
@@ -429,8 +490,7 @@ class FolderBrowser extends StatelessWidget {
       children: [
         if (work != null) _WorkHeader(work: work),
         for (final f in folders) _FolderTile(folder: f),
-        if (folders.isNotEmpty && tracks.isNotEmpty)
-          const Divider(height: 1),
+        if (folders.isNotEmpty && tracks.isNotEmpty) const Divider(height: 1),
         for (int i = 0; i < tracks.length; i++)
           _TrackTile(track: tracks[i], index: i),
       ],
@@ -455,141 +515,158 @@ class _WorkHeader extends StatelessWidget {
     // 异步读会先闪一帧「没抓过」，滚动时还会反复查库。
     final meta = appState.workMetadataSync(work.id!);
     final full = appState.cachedDlsiteWorkSync(work.id!);
-        final subtitle = [
-          if (meta?.circle != null && meta!.circle!.isNotEmpty) meta.circle!,
-          if (meta?.series != null && meta!.series!.isNotEmpty)
-            '系列·${meta.series!}',
-        ].join(' · ');
-        final facts = <String>[
-          if (meta?.rjCode != null && meta!.rjCode!.isNotEmpty) meta.rjCode!,
-          if (full?.releaseDate != null && full!.releaseDate!.isNotEmpty)
-            '发售 ${full.releaseDate!}',
-          if (full?.stars != null) '评分 ${full!.stars!.toStringAsFixed(1)}',
-        ];
-        final description = meta?.description?.trim() ?? '';
-        return Container(
-          key: const ValueKey('work-header'),
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-          decoration: BoxDecoration(
-            color: AppColors.panelOf(context),
-            border: Border(
-                bottom: BorderSide(color: AppColors.mutedLighterOf(context))),
+    final subtitle = [
+      if (meta?.circle != null && meta!.circle!.isNotEmpty) meta.circle!,
+      if (meta?.series != null && meta!.series!.isNotEmpty)
+        '系列·${meta.series!}',
+    ].join(' · ');
+    final facts = <String>[
+      if (meta?.rjCode != null && meta!.rjCode!.isNotEmpty) meta.rjCode!,
+      if (full?.releaseDate != null && full!.releaseDate!.isNotEmpty)
+        '发售 ${full.releaseDate!}',
+      if (full?.stars != null) '评分 ${full!.stars!.toStringAsFixed(1)}',
+    ];
+    final description = meta?.description?.trim() ?? '';
+    return Container(
+      key: const ValueKey('work-header'),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      decoration: BoxDecoration(
+        color: AppColors.panelOf(context),
+        border: Border(
+          bottom: BorderSide(color: AppColors.mutedLighterOf(context)),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CoverImage(
+            path: work.coverPath,
+            width: 96,
+            height: 96,
+            borderRadius: 8,
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CoverImage(
-                path: work.coverPath,
-                width: 96,
-                height: 96,
-                borderRadius: 8,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      work.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimaryOf(context)),
-                    ),
-                    if (subtitle.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(subtitle,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.textSecondaryOf(context))),
-                      ),
-                    if (facts.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(facts.join('  ·  '),
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.mutedLightOf(context))),
-                      ),
-                    if (description.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: InkWell(
-                          onTap: () => _showDescription(context, work.name,
-                              description),
-                          child: Text(
-                            description.replaceAll(RegExp(r'\s+'), ' '),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12,
-                                height: 1.5,
-                                color: AppColors.textSecondaryOf(context)),
-                          ),
-                        ),
-                      )
-                    else if (meta == null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text('在工具条上点 DLsite 可以补全社团、简介与评分',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: AppColors.mutedLightOf(context))),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        children: [
-                          _headerAction(
-                            context,
-                            key: const ValueKey('work-edit-cover'),
-                            icon: Icons.image_outlined,
-                            label: '编辑封面',
-                            onPressed: () =>
-                                showImportCoverDialog(context, work.id!),
-                          ),
-                          _headerAction(
-                            context,
-                            key: const ValueKey('work-add-to-queue'),
-                            icon: Icons.queue_music,
-                            label: '加入队列',
-                            onPressed: appState.tracks.isEmpty
-                                ? null
-                                : () async {
-                                    await appState
-                                        .addToPlayQueue(appState.tracks);
-                                    if (!context.mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                          content: Text(
-                                              '已加入 ${appState.tracks.length} 首')),
-                                    );
-                                  },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  work.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimaryOf(context),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (description.isNotEmpty)
-                    Text('点简介看全文',
+                if (subtitle.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondaryOf(context),
+                      ),
+                    ),
+                  ),
+                if (facts.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      facts.join('  ·  '),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.mutedLightOf(context),
+                      ),
+                    ),
+                  ),
+                if (description.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: InkWell(
+                      onTap: () =>
+                          _showDescription(context, work.name, description),
+                      child: Text(
+                        description.replaceAll(RegExp(r'\s+'), ' '),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: 11, color: AppColors.mutedOf(context))),
-                ],
-              ),
+                          fontSize: 12,
+                          height: 1.5,
+                          color: AppColors.textSecondaryOf(context),
+                        ),
+                      ),
+                    ),
+                  )
+                else if (meta == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '在工具条上点 DLsite 可以补全社团、简介与评分',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.mutedLightOf(context),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      _headerAction(
+                        context,
+                        key: const ValueKey('work-edit-cover'),
+                        icon: Icons.image_outlined,
+                        label: '编辑封面',
+                        onPressed: () =>
+                            showImportCoverDialog(context, work.id!),
+                      ),
+                      _headerAction(
+                        context,
+                        key: const ValueKey('work-add-to-queue'),
+                        icon: Icons.queue_music,
+                        label: '加入队列',
+                        onPressed: appState.tracks.isEmpty
+                            ? null
+                            : () async {
+                                await appState.addToPlayQueue(appState.tracks);
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      '已加入 ${appState.tracks.length} 首',
+                                    ),
+                                  ),
+                                );
+                              },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (description.isNotEmpty)
+                Text(
+                  '点简介看全文',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.mutedOf(context),
+                  ),
+                ),
             ],
           ),
-        );
+        ],
+      ),
+    );
   }
 
   Widget _headerAction(
@@ -620,16 +697,21 @@ class _WorkHeader extends StatelessWidget {
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640, maxHeight: 480),
           child: SingleChildScrollView(
-            child: SelectableText(text,
-                style: TextStyle(
-                    fontSize: 13,
-                    height: 1.6,
-                    color: AppColors.textSecondaryOf(ctx))),
+            child: SelectableText(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.6,
+                color: AppColors.textSecondaryOf(ctx),
+              ),
+            ),
           ),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
         ],
       ),
     );
@@ -652,16 +734,23 @@ class _FolderTile extends StatelessWidget {
             const Icon(Icons.folder, size: 20, color: AppColors.warning),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(folder.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      color: AppColors.textPrimaryOf(context),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500)),
+              child: Text(
+                folder.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.textPrimaryOf(context),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ),
             PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, size: 16, color: AppColors.mutedOf(context)),
+              icon: Icon(
+                Icons.more_vert,
+                size: 16,
+                color: AppColors.mutedOf(context),
+              ),
               onSelected: (v) => _onMenu(context, appState, v),
               itemBuilder: (_) => const [
                 PopupMenuItem(
@@ -694,8 +783,12 @@ class _FolderTile extends StatelessWidget {
                 ),
                 PopupMenuDivider(),
                 PopupMenuItem(
-                    value: 'delete',
-                    child: Text('删除', style: TextStyle(fontSize: 13, color: AppColors.danger))),
+                  value: 'delete',
+                  child: Text(
+                    '删除',
+                    style: TextStyle(fontSize: 13, color: AppColors.danger),
+                  ),
+                ),
               ],
             ),
           ],
@@ -704,7 +797,11 @@ class _FolderTile extends StatelessWidget {
     );
   }
 
-  Future<void> _onMenu(BuildContext context, AppState appState, String v) async {
+  Future<void> _onMenu(
+    BuildContext context,
+    AppState appState,
+    String v,
+  ) async {
     switch (v) {
       case 'open':
         await appState.enterFolder(folder.id!);
@@ -717,8 +814,11 @@ class _FolderTile extends StatelessWidget {
         if (context.mounted) showLaunchResult(context, r);
         break;
       case 'rename':
-        final name = await promptText(context,
-            title: '重命名文件夹', initial: folder.name);
+        final name = await promptText(
+          context,
+          title: '重命名文件夹',
+          initial: folder.name,
+        );
         if (name != null && name.isNotEmpty) {
           await appState.renameFolder(folder.id!, name);
         }
@@ -727,7 +827,9 @@ class _FolderTile extends StatelessWidget {
         final target = await showWorkPicker(context);
         if (target == null) return;
         await appState.moveFolderToWork(
-            folder.id!, target == kUnassignedWork ? null : target);
+          folder.id!,
+          target == kUnassignedWork ? null : target,
+        );
         break;
       case 'tags':
         final tags = await showTagPickerDialog(context, title: '为文件夹添加标签');
@@ -765,12 +867,15 @@ class _FolderTile extends StatelessWidget {
       case 'delete':
         final count = await appState.countMediaUnderFolder(folder.id!);
         if (!context.mounted) return;
-        final ok = await confirmDialog(context,
-            title: '删除文件夹「${folder.name}」？',
-            content: '将从软件里移除这个文件夹、它的子文件夹，以及其中的 '
-                '$count 条媒体记录（音频、图片、视频、字幕都算；'
-                '别的文件夹仍覆盖到的记录保留）。\n'
-                '磁盘文件不会被删除，之后可以重新导入。');
+        final ok = await confirmDialog(
+          context,
+          title: '删除文件夹「${folder.name}」？',
+          content:
+              '将从软件里移除这个文件夹、它的子文件夹，以及其中的 '
+              '$count 条媒体记录（音频、图片、视频、字幕都算；'
+              '别的文件夹仍覆盖到的记录保留）。\n'
+              '磁盘文件不会被删除，之后可以重新导入。',
+        );
         if (ok == true) {
           await appState.deleteFolderDeep(folder.id!);
         }
@@ -790,8 +895,9 @@ class _FolderTile extends StatelessWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text(removing ? '仅移除文件夹标签' : '仅标记文件夹'),
@@ -816,9 +922,9 @@ class _TrackTile extends StatelessWidget {
     final appState = context.watch<AppState>();
     // 用 select 只监听当前曲目/播放态，避免随进度 tick 全量重建列表
     final isCurrent = context.select<PlayerController, bool>(
-        (p) => p.currentTrack?.path == track.path);
-    final isPlaying =
-        context.select<PlayerController, bool>((p) => p.playing);
+      (p) => p.currentTrack?.path == track.path,
+    );
+    final isPlaying = context.select<PlayerController, bool>((p) => p.playing);
     final isSelected = appState.isTrackSelected(track.id ?? -1);
 
     return InkWell(
@@ -852,22 +958,37 @@ class _TrackTile extends StatelessWidget {
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        color: (isCurrent || isSelected)
-            ? AppColors.surfaceOf(context)
-            : null,
+        color: (isCurrent || isSelected) ? AppColors.surfaceOf(context) : null,
         child: Row(
           children: [
             SizedBox(
               width: 28,
               child: isSelected
-                  ? const Icon(Icons.check_box, size: 16, color: AppColors.accent)
+                  ? const Icon(
+                      Icons.check_box,
+                      size: 16,
+                      color: AppColors.accent,
+                    )
                   : isCurrent
-                      ? (isPlaying
-                          ? const Icon(Icons.graphic_eq, size: 16, color: AppColors.accent)
-                          : const Icon(Icons.play_arrow, size: 16, color: AppColors.accent))
-                      : Text('${index + 1}',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.mutedOf(context), fontSize: 12)),
+                  ? (isPlaying
+                        ? const Icon(
+                            Icons.graphic_eq,
+                            size: 16,
+                            color: AppColors.accent,
+                          )
+                        : const Icon(
+                            Icons.play_arrow,
+                            size: 16,
+                            color: AppColors.accent,
+                          ))
+                  : Text(
+                      '${index + 1}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.mutedOf(context),
+                        fontSize: 12,
+                      ),
+                    ),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -879,20 +1000,28 @@ class _TrackTile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isCurrent ? AppColors.accent : AppColors.textPrimaryOf(context),
+                      color: isCurrent
+                          ? AppColors.accent
+                          : AppColors.textPrimaryOf(context),
                       fontSize: 14,
-                      fontWeight:
-                          isCurrent ? FontWeight.w600 : FontWeight.normal,
+                      fontWeight: isCurrent
+                          ? FontWeight.w600
+                          : FontWeight.normal,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    [track.artist, track.album, track.format?.toUpperCase()]
-                        .where((e) => e != null && e.isNotEmpty)
-                        .join(' · '),
+                    [
+                      track.artist,
+                      track.album,
+                      track.format?.toUpperCase(),
+                    ].where((e) => e != null && e.isNotEmpty).join(' · '),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: AppColors.textSecondaryOf(context), fontSize: 12),
+                    style: TextStyle(
+                      color: AppColors.textSecondaryOf(context),
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
@@ -907,17 +1036,39 @@ class _TrackTile extends StatelessWidget {
                 // 已播时间 / 总时长：没播过的显示 0:00，播过的能一眼看出听到哪里
                 '${formatDuration(Duration(milliseconds: track.playPositionMs))}'
                 ' / ${formatDuration(Duration(milliseconds: track.durationMs!))}',
-                style: TextStyle(color: AppColors.mutedLightOf(context), fontSize: 12),
+                style: TextStyle(
+                  color: AppColors.mutedLightOf(context),
+                  fontSize: 12,
+                ),
               ),
             PopupMenuButton<String>(
-              icon: Icon(Icons.more_vert, size: 16, color: AppColors.mutedOf(context)),
+              icon: Icon(
+                Icons.more_vert,
+                size: 16,
+                color: AppColors.mutedOf(context),
+              ),
               onSelected: (v) => _onMenu(context, appState, v),
               itemBuilder: (_) => const [
-                PopupMenuItem(value: 'play', child: Text('播放', style: TextStyle(fontSize: 13))),
-                PopupMenuItem(value: 'subtitle', child: Text('替换字幕...', style: TextStyle(fontSize: 13))),
-                PopupMenuItem(value: 'subtitle_assign', child: Text('字幕归属...', style: TextStyle(fontSize: 13))),
-                PopupMenuItem(value: 'clear_subtitle', child: Text('清除字幕', style: TextStyle(fontSize: 13))),
-                PopupMenuItem(value: 'tags', child: Text('添加标签...', style: TextStyle(fontSize: 13))),
+                PopupMenuItem(
+                  value: 'play',
+                  child: Text('播放', style: TextStyle(fontSize: 13)),
+                ),
+                PopupMenuItem(
+                  value: 'subtitle',
+                  child: Text('替换字幕...', style: TextStyle(fontSize: 13)),
+                ),
+                PopupMenuItem(
+                  value: 'subtitle_assign',
+                  child: Text('字幕归属...', style: TextStyle(fontSize: 13)),
+                ),
+                PopupMenuItem(
+                  value: 'clear_subtitle',
+                  child: Text('清除字幕', style: TextStyle(fontSize: 13)),
+                ),
+                PopupMenuItem(
+                  value: 'tags',
+                  child: Text('添加标签...', style: TextStyle(fontSize: 13)),
+                ),
               ],
             ),
           ],
@@ -926,7 +1077,11 @@ class _TrackTile extends StatelessWidget {
     );
   }
 
-  Future<void> _onMenu(BuildContext context, AppState appState, String v) async {
+  Future<void> _onMenu(
+    BuildContext context,
+    AppState appState,
+    String v,
+  ) async {
     switch (v) {
       case 'play':
         await appState.playTrackAt(index);
@@ -938,10 +1093,12 @@ class _TrackTile extends StatelessWidget {
         break;
       case 'subtitle_assign':
         if (track.id != null) {
-          await SubtitleAssignDialog.show(context,
-              state: appState,
-              audioId: track.id!,
-              audioLabel: track.title ?? track.filename);
+          await SubtitleAssignDialog.show(
+            context,
+            state: appState,
+            audioId: track.id!,
+            audioLabel: track.title ?? track.filename,
+          );
         }
         break;
       case 'clear_subtitle':
@@ -951,13 +1108,15 @@ class _TrackTile extends StatelessWidget {
         break;
       case 'tags':
         if (track.id == null) return;
-        final existing = (await appState.getTrackTags(track.id!))
-            .map((t) => t.id)
-            .whereType<int>()
-            .toSet();
+        final existing = (await appState.getTrackTags(
+          track.id!,
+        )).map((t) => t.id).whereType<int>().toSet();
         if (!context.mounted) return;
-        final tags =
-            await showTagPickerDialog(context, title: '为曲目添加标签', selectedTagIds: existing);
+        final tags = await showTagPickerDialog(
+          context,
+          title: '为曲目添加标签',
+          selectedTagIds: existing,
+        );
         if (tags == null) return;
         for (final t in tags) {
           await appState.toggleTagOnTrack(track.id!, t);
