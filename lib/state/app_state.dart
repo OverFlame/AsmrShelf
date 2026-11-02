@@ -354,6 +354,7 @@ class AppState extends ChangeNotifier {
 
   // ── 字幕缓存 ──
   final Map<String, SubtitleDocument> _subtitleCache = {};
+  final Set<String> _subtitleRepairTried = <String>{};
 
   // ═══════════════ DAO 便捷访问 ═══════════════
 
@@ -774,6 +775,8 @@ class AppState extends ChangeNotifier {
     // 旧版一次性导入只建根文件夹，曲目全在子目录里，点进作品会显示为空。
     // 进入前按 media 路径补齐一次树；幂等，正常导入的作品只会多一次查询。
     await _repairWorkFolderTree(work);
+    // 旧版一次性导入也没有扫描同名字幕；进入时补一次，避免用户重导整个库。
+    await _repairWorkSubtitles(work);
     // 从系列页进的，面包屑保留系列；从首页进的就没有系列节点。
     library.showWork(work, series: library.currentSeries);
     // 元数据先装进内存，详情头同步读，省一次闪烁。
@@ -817,6 +820,40 @@ class AppState extends ChangeNotifier {
       mediaPaths: tracks.map((t) => t.path),
     );
     logInfo('AppState', '补齐作品文件夹树: ${work.name} (${tracks.length} 首)');
+  }
+
+  /// 旧版一次性导入的作品没有扫描同名字幕；第一次进入时补一遍。
+  ///
+  /// 只填空字幕的音频，不覆盖用户手选的字幕。本次运行里同一作品只扫一次，
+  /// 避免没有字幕的作品每次进入都遍历目录。
+  Future<void> _repairWorkSubtitles(Work work) async {
+    final rootPath = work.rootPath;
+    if (rootPath == null || rootPath.trim().isEmpty) return;
+    final key = rootPath.toLowerCase();
+    if (!_subtitleRepairTried.add(key)) return;
+
+    final tracks = await _trackDao.queryByDirs([rootPath]);
+    final missing = tracks
+        .where((t) =>
+            t.id != null &&
+            (t.subtitlePath == null || t.subtitlePath!.isEmpty))
+        .toList();
+    if (missing.isEmpty) return;
+
+    final matched = await FileScanner.scanSubtitlesForAudio(
+      rootPath,
+      missing.map((t) => t.path),
+    );
+    var repaired = 0;
+    for (final track in missing) {
+      final subtitle = matched[track.path];
+      if (subtitle == null) continue;
+      await _trackDao.setSubtitlePath(track.id!, subtitle);
+      repaired++;
+    }
+    if (repaired > 0) {
+      logInfo('AppState', '补齐作品字幕: ${work.name} ($repaired 首)');
+    }
   }
 
   /// 点开系列「大作品」，进入与全部作品页相同的封面视图。

@@ -61,6 +61,15 @@ void main() {
     expect(work.trackCount, 2);
   });
 
+  test('一次性扫描会匹配同目录字幕', () async {
+    final audio = await touch(root, 'RJ777777 作品/01_mp3/01.mp3');
+    final subtitle = await touch(root, 'RJ777777 作品/01_mp3/01.lrc');
+
+    final plan = await scanImportTree(root.path, writeCover: false);
+    final work = plan.works.single;
+    expect(work.subtitleByTrack[audio.path], subtitle.path);
+  });
+
   test('没有音频的目录记进 skipped，不当成作品', () async {
     await touch(root, '空目录/readme.txt');
     await touch(root, 'RJ222222 真作品/01.mp3');

@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 
 import 'cover_finder.dart';
 import 'dlsite/work_code.dart';
+import 'file_scanner.dart';
 
 /// 一首曲目：文件路径加上从文件名里剥出来的名字。
 class ImportTrack {
@@ -41,6 +42,7 @@ class ImportWork {
     this.coverPath,
     this.coverLevel = 6,
     required this.tracks,
+    this.subtitleByTrack = const {},
   });
 
   final String dirPath;
@@ -58,6 +60,9 @@ class ImportWork {
   final int coverLevel;
 
   final List<ImportTrack> tracks;
+
+  /// 曲目路径 → 同目录优先级最高的字幕路径。没有字幕时为空表。
+  final Map<String, String> subtitleByTrack;
 
   int get trackCount => tracks.length;
 
@@ -207,11 +212,16 @@ Future<ImportWork> _planWork(
       : p.basename(dir.path);
 
   final tracks = <ImportTrack>[];
+  final subtitles = <String>[];
   await for (final entity in dir.list(recursive: true, followLinks: false)) {
     if (entity is! File) continue;
-    final ext = p.extension(entity.path).toLowerCase();
-    if (!importAudioExtensions.contains(ext.substring(1))) continue;
     if (p.split(entity.path).any((s) => s == '特典')) continue;
+    final ext = p.extension(entity.path).toLowerCase();
+    if (isSubtitleFile(entity.path)) {
+      subtitles.add(entity.path);
+      continue;
+    }
+    if (!importAudioExtensions.contains(ext.substring(1))) continue;
     final fileName = p.basename(entity.path);
     final size = await entity.length();
     tracks.add(ImportTrack(
@@ -222,6 +232,15 @@ Future<ImportWork> _planWork(
     ));
   }
   tracks.sort((a, b) => _naturalLess(a.fileName, b.fileName) ? -1 : 1);
+  subtitles.sort();
+  final matched = FileScanner.matchSubtitles(
+    tracks.map((t) => t.path).toList(),
+    subtitles,
+  );
+  final subtitleByTrack = <String, String>{
+    for (final entry in matched.entries)
+      if (entry.value.isNotEmpty) entry.key: entry.value.first,
+  };
 
   String? coverPath;
   var level = 6;
@@ -247,6 +266,7 @@ Future<ImportWork> _planWork(
     coverPath: coverPath,
     coverLevel: level,
     tracks: tracks,
+    subtitleByTrack: subtitleByTrack,
   );
 }
 

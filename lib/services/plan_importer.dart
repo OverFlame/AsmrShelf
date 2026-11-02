@@ -72,6 +72,13 @@ class PlanImporter {
           workId: existingId,
           mediaPaths: work.tracks.map((t) => t.path),
         );
+        // 旧版只写了音频行；重跑时把扫描到的同名字幕补到空字段上。
+        for (final entry in work.subtitleByTrack.entries) {
+          await mediaDao.setSubtitlePathByPathIfMissing(
+            entry.key,
+            entry.value,
+          );
+        }
         skipped++;
         continue;
       }
@@ -99,6 +106,7 @@ class PlanImporter {
             'file_size': track.sizeBytes,
             'added_at': addedAt,
             'title': track.title,
+            'subtitle_path': work.subtitleByTrack[track.path],
             // media 不记 work_id 也不记 folder_id：与文件夹的关系在查询时按
             // 路径范围算（见 `lib/db/path_range.dart`），落库只认路径。
           },

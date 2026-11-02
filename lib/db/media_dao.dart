@@ -220,6 +220,20 @@ class MediaDao {
     await updateRow(id, {'subtitle_path': path}, type: MediaType.audio);
   }
 
+  /// 按媒体路径给还没有字幕的音频补一条，避免覆盖用户手选的字幕。
+  Future<int> setSubtitlePathByPathIfMissing(
+    String path,
+    String subtitlePath,
+  ) {
+    return _db.update(
+      'media',
+      {'subtitle_path': subtitlePath},
+      where: "path = ? AND media_type = 'audio' "
+          "AND (subtitle_path IS NULL OR subtitle_path = '')",
+      whereArgs: <Object?>[path],
+    );
+  }
+
   Future<void> setCoverPath(int id, String? path) async {
     await updateRow(id, {'cover_path': path});
   }

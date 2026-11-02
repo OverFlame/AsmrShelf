@@ -108,6 +108,22 @@ void main() {
     expect(children.map((f) => f.name), ['01_mp3', '02_wav']);
   });
 
+  test('进入旧版一次性导入的作品时补同名字幕', () async {
+    final id = await seedLegacyNestedWork('字幕作品');
+    final subtitle = File(p.join(tmp.path, '字幕作品', '01_mp3', '01.lrc'))
+      ..writeAsStringSync('[00:00.00]测试字幕');
+
+    await state.enterWork(id);
+
+    final audio = (await db.query(
+      'media',
+      where: "media_type = 'audio' AND filename = ?",
+      whereArgs: ['01.mp3'],
+    ))
+        .single;
+    expect(audio['subtitle_path'], subtitle.path);
+  });
+
   test('deleteWorks 删掉多部作品并清空选中', () async {
     final a = await seedWork('作品A');
     final b = await seedWork('作品B');

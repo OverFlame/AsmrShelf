@@ -159,6 +159,26 @@ void main() {
     expect((await db.query('folder_paths')).length, 3);
   });
 
+  test('一次性导入写入同名字幕，重跑补旧数据', () async {
+    await touch(root, 'RJ294126 作品A/01_mp3/01.mp3');
+    await touch(root, 'RJ294126 作品A/01_mp3/01.lrc');
+    final plan = await scanImportTree(root.path, writeCover: false);
+
+    await importer.apply(plan);
+    var audio = (await db.query('media',
+            where: "media_type = 'audio'"))
+        .single;
+    final subtitlePath = audio['subtitle_path'] as String;
+    expect(p.basename(subtitlePath), '01.lrc');
+
+    // 模拟旧版一次性导入：音频行在，subtitle_path 为空。
+    await db.update('media', {'subtitle_path': null});
+    final second = await importer.apply(plan);
+    expect(second.worksSkipped, 1);
+    audio = (await db.query('media', where: "media_type = 'audio'")).single;
+    expect(audio['subtitle_path'], subtitlePath);
+  });
+
   test('有封面时作品封面与元数据一起记下来', () async {
     await touch(root, 'RJ300001 作品/01.mp3');
     await touch(root, 'RJ300001 作品/cover.jpg');

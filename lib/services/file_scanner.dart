@@ -81,6 +81,33 @@ class FileScanner {
   static Future<ScanResult> scanDirectoryOffThread(String dirPath) =>
       compute(_scan, dirPath, debugLabel: 'asmrshelf.scan');
 
+  /// 只扫字幕文件，给已有音频补匹配用，不重复读音频元数据。
+  ///
+  /// 返回「音频路径 → 优先级最高的字幕路径」。目录读不了时返回空表。
+  static Future<Map<String, String>> scanSubtitlesForAudio(
+    String dirPath,
+    Iterable<String> audioPaths,
+  ) async {
+    final subtitles = <String>[];
+    try {
+      await for (final entity
+          in Directory(dirPath).list(recursive: true, followLinks: false)) {
+        if (entity is File && isSubtitleFile(entity.path)) {
+          subtitles.add(entity.path);
+        }
+      }
+    } catch (e) {
+      logWarn('Scanner', '字幕补扫失败 "$dirPath": $e');
+    }
+    subtitles.sort();
+    final audio = audioPaths.toList()..sort();
+    final matched = matchSubtitles(audio, subtitles);
+    return {
+      for (final entry in matched.entries)
+        if (entry.value.isNotEmpty) entry.key: entry.value.first,
+    };
+  }
+
   /// 测试用：判断 [_scan] 是否跑在调用方 isolate 上。
   ///
   /// 每个 isolate 有自己的静态变量，扫描跑到别的 isolate 时这里的值不变。
@@ -127,7 +154,7 @@ class FileScanner {
     covers.sort();
     images.sort();
     videos.sort();
-    final map = _matchSubtitles(audio, subtitles);
+    final map = matchSubtitles(audio, subtitles);
     logInfo('Scanner',
         'scanDirectory "$dirPath" → ${audio.length} audio, ${map.length} subtitles, ${covers.length} covers, ${images.length} images, ${videos.length} videos');
     return ScanResult(
@@ -149,7 +176,7 @@ class FileScanner {
   ///
   /// 同档内按路径字典序，保证结果稳定。只认能解析的格式，
   /// 占位格式（.ass 等）只入库，不参与匹配。
-  static Map<String, List<String>> _matchSubtitles(
+  static Map<String, List<String>> matchSubtitles(
       List<String> audio, List<String> subs) {
     // 先按目录分组。旧实现每首音频都遍历整个字幕列表，库里几千张图/字幕时
     // 是 O(音频×字幕)；分组后只处理同目录的候选。
