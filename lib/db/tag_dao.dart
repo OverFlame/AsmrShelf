@@ -541,4 +541,31 @@ class TagDao {
     logInfo('TagDao', 'deleteOrphanTags: removed $count orphan(s)');
     return count;
   }
+  // ═══ 作品标签（work_tags） ═══
+
+  /// 给作品挂一个标签，重复挂不会报错。
+  Future<void> attachToWork(int workId, int tagId) async {
+    await _db.insert(
+      'work_tags',
+      {'work_id': workId, 'tag_id': tagId},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  /// 摘掉作品上的一个标签。
+  Future<void> detachFromWork(int workId, int tagId) async {
+    await _db.delete('work_tags',
+        where: 'work_id = ? AND tag_id = ?', whereArgs: [workId, tagId]);
+  }
+
+  /// 作品挂着的标签，按命名空间与名字排序。
+  Future<List<Tag>> tagsForWork(int workId) async {
+    final rows = await _db.rawQuery('''
+      SELECT t.* FROM tags t
+      JOIN work_tags wt ON wt.tag_id = t.id
+      WHERE wt.work_id = ?
+      ORDER BY t.namespace, t.name
+    ''', [workId]);
+    return [for (final row in rows) Tag.fromMap(row)];
+  }
 }
