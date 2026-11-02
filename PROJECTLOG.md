@@ -215,3 +215,26 @@
 |---|---|
 | `flutter analyze --no-fatal-infos` | 无问题 |
 | `flutter test` | 554 例全过 |
+
+## 2026-11-02 阶段四第三步：清掉只服务视觉的死代码
+
+### 动作
+
+| 项 | 改动 |
+|---|---|
+| 控件 | 删 `lib/widgets/color_picker_dialog.dart`（零引用）、`volume_cover_dialog.dart` 与 `cover_crop_editor.dart`（仅互相引用，没有入口） |
+| 服务 | 删 `lib/services/video_cover_service.dart` 与 `AppState` 里的 `videoCoverFor`、`_videoCovers`、`_videoCoverFutures`、构造参数 `videoCovers` |
+| 测试 | 删 `volume_cover_dialog_test.dart`、`cover_crop_editor_test.dart`、`app_state_video_cover_test.dart`、`video_cover_service_test.dart` |
+
+`setMediaCover` 保留：音频单文件手选封面写的就是这一列，只是不再清视频封面缓存。
+
+### 判定依据
+
+三个控件都靠「有没有入口」判死，不靠猜：`color_picker_dialog` 全仓零引用，`volume_cover_dialog` 只被自己的测试引用，`cover_crop_editor` 只被 `volume_cover_dialog` 引用。视频封面服务同理，`videoCoverFor` 的调用点只剩它自己的测试。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze --no-fatal-infos` | 无问题 |
+| `flutter test` | 527 例全过 |

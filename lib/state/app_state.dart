@@ -24,7 +24,6 @@ import '../services/subtitle_parser.dart';
 import '../services/subtitle_style.dart';
 import '../services/subtitle_service.dart';
 import '../services/thumbnail_cache.dart';
-import '../services/video_cover_service.dart';
 import '../services/video_launcher.dart';
 import '../services/volume_cover_service.dart';
 import '../utils/filter_expression.dart';
@@ -343,9 +342,7 @@ class AppState extends ChangeNotifier {
   AppState({
     required this.player,
     VideoLauncher? videoLauncher,
-    VideoCoverService? videoCovers,
-  })  : _launcher = videoLauncher ?? VideoLauncher(),
-        _videoCoversOverride = videoCovers;
+  })  : _launcher = videoLauncher ?? VideoLauncher();
 
   Future<void> init() async {
     logInfo('AppState', 'Initializing...');
@@ -2581,14 +2578,11 @@ class AppState extends ChangeNotifier {
 
   /// 给一条媒体行指定或清除它自己的缩略图。
   ///
-  /// 音频单文件手选封面就写在这里（`media.cover_path`）；视频的封面走
-  /// [videoCoverFor] 的三级取图，不占这列。
+  /// 音频单文件手选封面就写在这里（`media.cover_path`）。
   Future<void> setMediaCover(int id, String? path) async {
     // 同一路径的文件被覆盖后，FileImage 仍会命中旧解码结果；先驱逐再落库。
     if (path != null) ImageCacheGuard.invalidate(path);
     await _mediaDao.setCoverPath(id, path);
-    // 手选的封面要能立刻盖住三级取图的结果，所以把视频封面的内存缓存一起清掉。
-    _videoCoverFutures.clear();
     // 在屏的磁贴读的是内存里那一行，换掉它，用户点完菜单立刻看到新封面。
     final updated = await _mediaDao.getById(id);
     if (updated == null) {
@@ -2596,42 +2590,6 @@ class AppState extends ChangeNotifier {
     }
     _mediaRevision++;
     notifyListeners();
-  }
-
-  final VideoCoverService? _videoCoversOverride;
-  VideoCoverService? _videoCoversLazy;
-  final Map<String, Future<String?>> _videoCoverFutures = {};
-
-  /// 视频封面的取图服务。延迟到第一次用才建：ThumbnailService 要 init 过，
-  /// 缓存目录才拿得到（AppState.init 里初始化它）。
-  VideoCoverService get _videoCovers =>
-      _videoCoversLazy ??=
-          _videoCoversOverride ??
-          VideoCoverService(
-            outputDir: ThumbnailService.instance.isInitialized
-                ? ThumbnailService.instance.cacheDir
-                : null,
-          );
-
-  /// 取一条视频行的封面路径：行自己的 `cover_path` 优先，否则走
-  /// [VideoCoverService] 的三级取图（系统缩略图 → 容器内嵌封面 → 首帧）。
-  ///
-  /// 同一个路径只取一次，结果留在内存里；取不到返回 null，由界面退回图标。
-  /// 这里不 stat 文件：路径失效时由图片组件的 errorBuilder 兜住，
-  /// build 路径上不做同步文件 IO。
-  Future<String?> videoCoverFor(MediaItem item) {
-    final own = item.coverPath;
-    if (own != null && own.isNotEmpty) {
-      return Future<String?>.value(own);
-    }
-    return _videoCoverFutures.putIfAbsent(item.path, () async {
-      try {
-        return await _videoCovers.coverFor(item.path);
-      } catch (e) {
-        logDebug('AppState', 'videoCoverFor(${item.path}) failed: $e');
-        return null;
-      }
-    });
   }
 
   /// 一条媒体行显示用的封面：先看行自己的 `cover_path`，再退回当前作品的封面。
