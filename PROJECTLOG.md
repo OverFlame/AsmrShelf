@@ -136,3 +136,32 @@
 1. 阶段四先把 `ImportState` 与 `CoverState` 拆出来，这两个被阶段五、六同时依赖。
 2. 拆完后再删 `media` 的 `width`/`height`、`folders` 的阅读列与 `image|video` 类型值，v1 的库结构才算收干净。
 3. 阶段五重做作品层时，`works.root_path` 与 `work_tags` 已经在库里，直接接。
+
+## 2026-11-02 阶段四前置：两个纯函数模块
+
+### 为什么先写这两个
+
+阶段四拆 `AppState` 时，编号识别与封面挑选要各拆一次。先把它们做成不碰 IO 的纯函数模块，拆的时候直接调用，不必在状态对象里复制逻辑。两处规则都来自 `docs/需求研究与设计备忘.md` 第 5.1 节与第 12 节。
+
+### 新增文件
+
+| 文件 | 内容 |
+|---|---|
+| `lib/services/dlsite/work_code.dart` | `WorkCode`、`parseWorkCode`、`findWorkCode`、`isValidWorkCode`；开头优先匹配，失败退到全文搜一次；编号归一成大写，剩余部分作标题 |
+| `lib/services/cover_selector.dart` | `CoverCandidate`、`scoreCoverName`、`scoreCoverPath`、`scoreSize`、`pickBestCover`；白名单形态、强词弱词、目录信号、深浅度、尺寸分都在这一层 |
+
+`pickBestCover` 的排序键依次是分值、目录深度、文件名自然序，尺寸分靠可选回调 `sizeOf` 注入，模块本身不读文件。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze --no-fatal-infos` | 无问题 |
+| `flutter test test/services/work_code_test.dart` | 20 例全过 |
+| `flutter test test/services/cover_selector_test.dart` | 18 例全过 |
+| `flutter test` | 559 例全过 |
+
+### 两条实现决定
+
+1. **标题保留策略**：编号在开头时，标题就是剩余部分；编号在中间时，把编号抠掉后合并两侧再压缩连续空格。这样 `[サークル] RJ294126 作品名` 拆成 `[サークル] 作品名`，社团名不丢。
+2. **白名单整段对齐**：`cover10.jpg` 不算白名单形态，只有基名整段等于 `cover` 才算。带序号的图交给强词与目录信号打分，避免把一串 `cover1` 到 `cover20` 全判成封面。
