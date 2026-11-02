@@ -15,6 +15,7 @@ const String sampleBody = '''
   "maker_id": "RG51931",
   "series_name": "系列",
   "series_id": "SRI0000026279",
+  "title_work_count": 3,
   "intro_s": "简介文本",
   "rate_average_star": 50,
   "rate_count": 25497,
@@ -61,6 +62,8 @@ void main() {
       expect(work.makerName, '社团');
       expect(work.makerId, 'RG51931');
       expect(work.seriesName, '系列');
+      expect(work.seriesId, 'SRI0000026279');
+      expect(work.titleWorkCount, 3);
       expect(work.description, '简介文本');
     });
 

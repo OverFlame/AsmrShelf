@@ -9,6 +9,8 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../../utils/log_util.dart';
+import '../settings_service.dart';
+import 'dlsite_api.dart' show proxyDirectiveFor;
 
 /// 一次图片响应的结果。
 class DlsiteImage {
@@ -33,7 +35,8 @@ class DlsiteCoverDownloader {
   DlsiteCoverDownloader({
     Future<DlsiteImage?> Function(Uri url)? fetch,
     this.maxBytes = 8 * 1024 * 1024,
-  }) : _fetch = fetch ?? fetchImageBytes;
+    String Function()? proxy,
+  }) : _fetch = fetch ?? ((url) => fetchImageBytes(url, proxy: proxy));
 
   /// 返回 null 表示响应 404 或不是图片。
   final Future<DlsiteImage?> Function(Uri url) _fetch;
@@ -69,11 +72,21 @@ class DlsiteCoverDownloader {
       host == allowed || host.endsWith('.$allowed');
 
   /// 真实的图片请求。30 秒超时，最多跟三次重定向。
-  static Future<DlsiteImage?> fetchImageBytes(Uri url) async {
+  ///
+  /// 和 API 请求共用同一个 DLsite 代理设置；[proxy] 用于测试注入，
+  /// 不传时每次请求都读设置页里保存的值。
+  static Future<DlsiteImage?> fetchImageBytes(
+    Uri url, {
+    String Function()? proxy,
+  }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 30)
-      ..userAgent =
-          'AsmrShelf/0.1 (personal music player; contact: local app)';
+      ..userAgent = 'AsmrShelf/0.1 (personal music player; contact: local app)';
+    final proxyValue = (proxy?.call() ?? SettingsService.instance.dlsiteProxy)
+        .trim();
+    if (proxyValue.isNotEmpty) {
+      client.findProxy = (_) => proxyDirectiveFor(proxyValue);
+    }
     try {
       final req = await client.getUrl(url);
       final res = await req.close().timeout(const Duration(seconds: 30));
@@ -81,8 +94,10 @@ class DlsiteCoverDownloader {
         logWarn('DlsiteCover', '下载封面失败: HTTP ${res.statusCode} $url');
         return null;
       }
-      final bytes = await res
-          .fold<BytesBuilder>(BytesBuilder(copy: false), (b, chunk) => b..add(chunk));
+      final bytes = await res.fold<BytesBuilder>(
+        BytesBuilder(copy: false),
+        (b, chunk) => b..add(chunk),
+      );
       return DlsiteImage(
         bytes: bytes.takeBytes(),
         contentType: res.headers.contentType?.mimeType ?? '',

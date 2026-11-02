@@ -82,6 +82,12 @@ class WorkMetadataDao {
     return rows.isEmpty ? null : WorkMetadata.fromMap(rows.first);
   }
 
+  /// 全部元数据，给系列索引重建用。
+  Future<List<WorkMetadata>> listAll() async {
+    final rows = await db.query('work_metadata', orderBy: 'work_id ASC');
+    return [for (final row in rows) WorkMetadata.fromMap(row)];
+  }
+
   /// 按 RJ 号找作品。唯一索引保证最多一行。
   Future<WorkMetadata?> getByRjCode(String rjCode) async {
     final rows = await db.query('work_metadata',

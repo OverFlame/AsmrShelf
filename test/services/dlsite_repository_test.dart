@@ -195,7 +195,7 @@ void main() {
     ]);
     final result = await repoWith(transport).fetchForWork(workId, 'RJ999999');
     expect(result.ok, isFalse);
-    expect(result.message, contains('没有对应的作品'));
+    expect(result.message, contains('空数据'));
   });
 
   test('联网失败返回提示而不是抛异常', () async {

@@ -273,7 +273,8 @@ class _TagPanelState extends State<TagPanel> {
             padding: const EdgeInsets.only(bottom: 4),
             children: [
               _navEntry(
-                selected: appState.currentWork == null,
+                selected: appState.currentWork == null &&
+                    appState.currentSeries == null,
                 icon: Icons.home_outlined,
                 label: '全部作品',
                 onTap: () {
@@ -281,16 +282,27 @@ class _TagPanelState extends State<TagPanel> {
                   widget.onNavigate?.call();
                 },
               ),
-              for (final w in appState.works)
+              for (final series in appState.seriesGroups)
                 _navEntry(
-                  selected: appState.currentWork?.id == w.id,
-                  icon: Icons.album_outlined,
-                  label: w.name,
+                  selected: appState.currentSeries?.key == series.key,
+                  icon: Icons.auto_stories_outlined,
+                  label: '${series.name} · ${series.badge}',
                   onTap: () {
-                    appState.enterWork(w.id!);
+                    appState.enterSeries(series);
                     widget.onNavigate?.call();
                   },
                 ),
+              for (final w in appState.works)
+                if (appState.dlsite.seriesForWork(w.id ?? -1) == null)
+                  _navEntry(
+                    selected: appState.currentWork?.id == w.id,
+                    icon: Icons.album_outlined,
+                    label: w.name,
+                    onTap: () {
+                      appState.enterWork(w.id!);
+                      widget.onNavigate?.call();
+                    },
+                  ),
               for (final f in appState.unassignedFolders)
                 _navEntry(
                   selected: appState.currentFolderId == f.id,

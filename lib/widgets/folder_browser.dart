@@ -108,6 +108,10 @@ class FolderBrowser extends StatelessWidget {
     if (crumb.id == -2) {
       // 全部作品根节点
       appState.goHome();
+    } else if (crumb.id == -3) {
+      // 系列书套
+      final series = appState.currentSeries;
+      if (series != null) appState.enterSeries(series);
     } else if (crumb.id == -1) {
       // 作品标记
       if (crumb.workId != null) appState.enterWork(crumb.workId!);

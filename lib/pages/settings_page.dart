@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/backup_service.dart';
+import '../services/dlsite/dlsite_api.dart';
 import '../services/settings_service.dart';
 import '../services/subtitle_style.dart';
 import '../services/thumbnail_cache.dart';
@@ -272,6 +273,24 @@ class SettingsPage extends StatelessWidget {
                     onPressed: () => appState.clearAutoImportIgnored(),
                     child: const Text('清空'),
                   ),
+          ),
+          const Divider(height: 1),
+
+          // ── DLsite 网络 ──
+          const _SectionHeader('DLsite 网络'),
+          ListTile(
+            key: const ValueKey('dlsite-proxy-tile'),
+            leading: const Icon(Icons.vpn_lock_outlined, size: 18),
+            title: const Text('DLsite 网络代理'),
+            subtitle: Text(
+              appState.dlsiteProxy.isEmpty ? '直连（不经过代理）' : appState.dlsiteProxy,
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => _editDlsiteProxy(context, appState),
           ),
           const Divider(height: 1),
 
@@ -736,9 +755,7 @@ class SettingsPage extends StatelessWidget {
         ? '已有导入正在进行，稍后再试'
         : '导入完成：新建 ${outcome.worksCreated} 部作品，'
               '新增 ${outcome.tracksInserted} 首曲目';
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _runAutoImportNow(
@@ -751,9 +768,21 @@ class SettingsPage extends StatelessWidget {
         ? '目录不可用，或已有导入正在进行'
         : '扫描完成：新建 ${outcome.worksCreated} 部作品，'
               '新增 ${outcome.tracksInserted} 首曲目';
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 编辑抓 DLsite 用的代理。空串表示直连；格式在这里就校验，不把坏值落盘。
+  Future<void> _editDlsiteProxy(BuildContext context, AppState appState) async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => _DlsiteProxyDialog(initial: appState.dlsiteProxy),
+    );
+    if (result == null) return;
+    await appState.setDlsiteProxy(result);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.isEmpty ? '已改为直连' : '代理已保存：$result')),
+    );
   }
 
   /// 选目录 → 复制一份一致的数据库快照。
@@ -770,9 +799,9 @@ class SettingsPage extends StatelessWidget {
     } catch (e) {
       logWarn('Settings', '导出备份失败: $e');
       if (!context.mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('备份失败：$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('备份失败：$e')),
+      );
     }
   }
 
@@ -822,6 +851,82 @@ class _SectionHeader extends StatelessWidget {
           color: AppColors.accent,
         ),
       ),
+    );
+  }
+}
+
+/// 代理输入框。保存时校验格式，失败留在对话框里改，不把坏值写进设置。
+class _DlsiteProxyDialog extends StatefulWidget {
+  const _DlsiteProxyDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_DlsiteProxyDialog> createState() => _DlsiteProxyDialogState();
+}
+
+class _DlsiteProxyDialogState extends State<_DlsiteProxyDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    try {
+      final normalized = normalizeDlsiteProxy(_controller.text);
+      Navigator.of(context).pop(normalized);
+    } on FormatException catch (e) {
+      setState(() => _error = e.message);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('DLsite 网络代理'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            key: const ValueKey('dlsite-proxy-input'),
+            controller: _controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: 'http://127.0.0.1:7897',
+              errorText: _error,
+            ),
+            onSubmitted: (_) => _save(),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '填 HTTP 代理地址，留空表示直连。Clash Verge 的混合端口默认是 7897；'
+            '只支持 HTTP/HTTPS 代理，不支持 SOCKS。',
+            style: TextStyle(
+              fontSize: 11,
+              color: AppColors.mutedOf(context),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('dlsite-proxy-save'),
+          onPressed: _save,
+          child: const Text('保存'),
+        ),
+      ],
     );
   }
 }

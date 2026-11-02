@@ -11,6 +11,7 @@ import 'package:asmrshelf/db/tag_dao.dart';
 import 'package:asmrshelf/db/track_dao.dart';
 import 'package:asmrshelf/db/work_dao.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
+import 'package:asmrshelf/services/dlsite/series_index.dart';
 import 'package:asmrshelf/state/library_state.dart';
 import 'package:asmrshelf/state/tag_filter.dart';
 import '../support/test_env.dart';
@@ -24,22 +25,23 @@ void main() {
   var notified = 0;
 
   LibraryState build() => LibraryState(
-        trackDao: () => TrackDao(DatabaseManager.instance.db),
-        workDao: () => WorkDao(DatabaseManager.instance.db),
-        folderDao: () => FolderDao(DatabaseManager.instance.db),
-        mediaDao: () => MediaDao(DatabaseManager.instance.db),
-        tagDao: () => TagDao(DatabaseManager.instance.db),
-        hasAdvancedFilter: () => false,
-        tagFilter: () => const TagFilter(),
-        matchingIds: (_) async => <int>{},
-        filterFolders: (folders, _) async => folders,
-        sortTracks: (tracks) => tracks,
-      );
+    trackDao: () => TrackDao(DatabaseManager.instance.db),
+    workDao: () => WorkDao(DatabaseManager.instance.db),
+    folderDao: () => FolderDao(DatabaseManager.instance.db),
+    mediaDao: () => MediaDao(DatabaseManager.instance.db),
+    tagDao: () => TagDao(DatabaseManager.instance.db),
+    hasAdvancedFilter: () => false,
+    tagFilter: () => const TagFilter(),
+    matchingIds: (_) async => <int>{},
+    filterFolders: (folders, _) async => folders,
+    sortTracks: (tracks) => tracks,
+  );
 
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('asmrshelf_library_state');
-    PathProviderPlatform.instance =
-        FakePathProvider(p.join(tmp.path, 'support'));
+    PathProviderPlatform.instance = FakePathProvider(
+      p.join(tmp.path, 'support'),
+    );
     DataDirService.instance.resetCache();
     await DatabaseManager.instance.close();
     await DatabaseManager.instance.init();
@@ -79,6 +81,59 @@ void main() {
     expect(state.breadcrumb.last.name, '作品A');
   });
 
+  test('showSeries 清掉作品状态，面包屑是全部作品加系列', () {
+    final series = DlsiteSeries(
+      key: 'id:100',
+      id: '100',
+      name: '雨の日',
+      total: 3,
+      workIds: const [1, 2],
+    );
+    state.currentWork = Work(
+      id: 1,
+      name: '旧作品',
+      library: 'audio',
+      sortOrder: 0,
+      createdAt: 0,
+    );
+    state.showSeries(series);
+    expect(state.currentSeries?.key, 'id:100');
+    expect(state.currentWork, isNull);
+    expect(state.breadcrumb.map((c) => c.id), [-2, -3]);
+    expect(state.breadcrumb.last.name, '雨の日');
+  });
+
+  test('从系列进作品时面包屑保留系列节点', () async {
+    final work = await WorkDao(DatabaseManager.instance.db).create('作品A');
+    final series = DlsiteSeries(
+      key: 'id:100',
+      id: '100',
+      name: '雨の日',
+      workIds: [work.id!],
+    );
+    state.showWork(work, series: series);
+    expect(state.breadcrumb.map((c) => c.id), [-2, -3, -1]);
+    expect(state.currentSeries, isNotNull);
+  });
+
+  test('系列页全选只选系列成员，不把散作品带上', () async {
+    final db = DatabaseManager.instance.db;
+    final a = await WorkDao(db).create('系列A');
+    final b = await WorkDao(db).create('系列B');
+    final loose = await WorkDao(db).create('散作品');
+    await state.refresh();
+    final series = DlsiteSeries(
+      key: 'id:100',
+      id: '100',
+      name: '雨の日',
+      workIds: [a.id!, b.id!],
+    );
+    state.showSeries(series);
+    state.selectAllWorks();
+    expect(state.selectedWorkIds, {a.id, b.id});
+    expect(state.selectedWorkIds, isNot(contains(loose.id)));
+  });
+
   test('切上下文后选中集合只保留可见曲目', () async {
     final db = DatabaseManager.instance.db;
     final work = await WorkDao(db).create('作品A');
@@ -87,11 +142,13 @@ void main() {
     final dir = Directory(p.join(tmp.path, 'media', 'v1'))
       ..createSync(recursive: true);
     File(p.join(dir.path, '01.mp3')).writeAsBytesSync(List<int>.filled(8, 0));
-    await TrackDao(db).insert(TrackItem(
-      path: p.join(dir.path, '01.mp3'),
-      filename: '01.mp3',
-      addedAt: DateTime.now().millisecondsSinceEpoch,
-    ));
+    await TrackDao(db).insert(
+      TrackItem(
+        path: p.join(dir.path, '01.mp3'),
+        filename: '01.mp3',
+        addedAt: DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
 
     state.showWork(work);
     await state.refresh();
@@ -123,11 +180,13 @@ void main() {
       ..createSync(recursive: true);
     for (final name in ['睡眠導入.mp3', '杂谈.mp3']) {
       File(p.join(dir.path, name)).writeAsBytesSync(List<int>.filled(8, 0));
-      await TrackDao(db).insert(TrackItem(
-        path: p.join(dir.path, name),
-        filename: name,
-        addedAt: DateTime.now().millisecondsSinceEpoch,
-      ));
+      await TrackDao(db).insert(
+        TrackItem(
+          path: p.join(dir.path, name),
+          filename: name,
+          addedAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
     }
 
     state.showWork(work);

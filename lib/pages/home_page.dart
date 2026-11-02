@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/dlsite/series_index.dart';
 import '../services/import_scanner.dart';
 import '../services/settings_service.dart';
 import '../services/thumbnail_cache.dart';
@@ -204,14 +205,18 @@ class _HomePageState extends State<HomePage> {
       );
     }
     if (appState.currentWork != null) return const FolderBrowser();
+    final series = appState.currentSeries;
     return Column(
       children: [
+        if (series != null) _SeriesBar(appState: appState, series: series),
         if (appState.workSelectionMode)
           _WorkSelectionToolbar(appState: appState)
         else
           const _VisualToolbar(),
         const Divider(height: 1),
-        if (!appState.workSelectionMode && appState.recentTracks.isNotEmpty)
+        if (series == null &&
+            !appState.workSelectionMode &&
+            appState.recentTracks.isNotEmpty)
           _RecentBar(appState: appState),
         const Expanded(child: WorksGrid(library: 'audio')),
       ],
@@ -290,8 +295,52 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 音频库工具条：网格列数、视图模式、多选、排序、标签筛选、高级筛选、
-/// 播放本目录、添加文件夹、刷新与清理缩略图缓存。
+/// 系列页顶部：返回全部作品 + 系列名 + 已导入/总数。
+class _SeriesBar extends StatelessWidget {
+  const _SeriesBar({required this.appState, required this.series});
+
+  final AppState appState;
+  final DlsiteSeries series;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          TextButton.icon(
+            key: const ValueKey('series-back'),
+            onPressed: () => appState.goUp(),
+            icon: const Icon(Icons.arrow_back, size: 16),
+            label: const Text('全部作品', style: TextStyle(fontSize: 12)),
+          ),
+          Text('/', style: TextStyle(color: AppColors.mutedOf(context))),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              series.name,
+              key: const ValueKey('series-title'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.textPrimaryOf(context),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            series.badge,
+            key: const ValueKey('series-count'),
+            style: TextStyle(color: AppColors.mutedOf(context), fontSize: 12),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+    );
+  }
+}
+
 class _VisualToolbar extends StatelessWidget {
   const _VisualToolbar();
 
@@ -708,6 +757,8 @@ class _WorkSelectionToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = appState.selectedWorkIds.length;
+    final scopeCount = appState.visibleWorks.length;
+    final selectedAll = scopeCount > 0 && count == scopeCount;
     return SizedBox(
       height: 48,
       child: SingleChildScrollView(
@@ -732,7 +783,7 @@ class _WorkSelectionToolbar extends StatelessWidget {
             TextButton(
               key: const ValueKey('work-select-all'),
               onPressed: () {
-                if (count == appState.works.length) {
+                if (selectedAll) {
                   appState.clearWorkSelection();
                   appState.enterWorkSelectionMode();
                 } else {
@@ -740,7 +791,7 @@ class _WorkSelectionToolbar extends StatelessWidget {
                 }
               },
               child: Text(
-                count == appState.works.length ? '取消全选' : '全选',
+                selectedAll ? '取消全选' : '全选',
                 style: const TextStyle(fontSize: 12),
               ),
             ),
@@ -748,30 +799,29 @@ class _WorkSelectionToolbar extends StatelessWidget {
               key: const ValueKey('work-batch-dlsite'),
               tooltip: '批量抓取 DLsite 元数据',
               icon: const Icon(Icons.cloud_download_outlined, size: 18),
-              onPressed: count == 0
-                  ? null
-                  : () => _batchScrape(context),
+              onPressed: count == 0 ? null : () => _batchScrape(context),
             ),
             IconButton(
               key: const ValueKey('work-batch-refresh'),
               tooltip: '按磁盘刷新选中作品',
               icon: const Icon(Icons.refresh, size: 18),
-              onPressed: count == 0
-                  ? null
-                  : () => _batchRefresh(context),
+              onPressed: count == 0 ? null : () => _batchRefresh(context),
             ),
             IconButton(
               key: const ValueKey('work-batch-tags'),
               tooltip: '批量添加标签',
               icon: const Icon(Icons.label_outline, size: 18),
-              onPressed: count == 0 ? null : () => _batchTags(context, add: true),
+              onPressed: count == 0
+                  ? null
+                  : () => _batchTags(context, add: true),
             ),
             IconButton(
               key: const ValueKey('work-batch-tags-remove'),
               tooltip: '批量移除标签',
               icon: const Icon(Icons.label_off_outlined, size: 18),
-              onPressed:
-                  count == 0 ? null : () => _batchTags(context, add: false),
+              onPressed: count == 0
+                  ? null
+                  : () => _batchTags(context, add: false),
             ),
             const SizedBox(width: 4),
             IconButton(
@@ -797,7 +847,8 @@ class _WorkSelectionToolbar extends StatelessWidget {
     final ok = await confirmDialog(
       context,
       title: '删除选中的 ${ids.length} 部作品？',
-      content: '将从软件里移除这些作品、它们下面的文件夹，以及其中的 $media 条媒体记录。\n'
+      content:
+          '将从软件里移除这些作品、它们下面的文件夹，以及其中的 $media 条媒体记录。\n'
           '磁盘文件不会被删除，之后可以重新导入。',
     );
     if (ok != true || !context.mounted) return;
@@ -841,9 +892,9 @@ class _WorkSelectionToolbar extends StatelessWidget {
     }
     if (!context.mounted) return;
     if (mediaIds.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('选中的作品里还没有媒体，先导入再看标签')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('选中的作品里还没有媒体，先导入再看标签')));
       return;
     }
     Set<int>? current;
@@ -851,9 +902,9 @@ class _WorkSelectionToolbar extends StatelessWidget {
       current = await appState.getTagIdsOnMedia(mediaIds);
       if (!context.mounted) return;
       if (current.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('选中的作品里的媒体还没有标签')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('选中的作品里的媒体还没有标签')));
         return;
       }
     }

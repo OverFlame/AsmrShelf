@@ -10,6 +10,8 @@ DlsiteWork _work({bool withCover = true}) => DlsiteWork.fromJson({
       'work_name_kana': 'えんきょく',
       'maker_name': '社团A',
       'series_name': '系列B',
+      'series_id': 'SRI1',
+      'title_work_count': 3,
       'intro_s': '这是简介',
       'regist_date': '2024-05-01 00:00:00',
       'rate_average_star': 48,
@@ -45,6 +47,8 @@ void main() {
     for (final text in [
       '社团A',
       '系列B',
+      'SRI1',
+      '共 3 部',
       'ASMR',
       '逢坂成美',
       '4.8 / 5（12 人）',

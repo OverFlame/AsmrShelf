@@ -12,6 +12,7 @@ import '../services/dlsite/dlsite_api.dart';
 import '../services/dlsite/dlsite_cover.dart';
 import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
+import '../services/dlsite/series_index.dart';
 import '../services/dlsite/work_code.dart';
 import '../utils/log_util.dart';
 
@@ -42,6 +43,59 @@ class DlsiteState extends ChangeNotifier {
 
   /// 反解过的完整作品信息，跟 `_metadata` 一起失效。
   final Map<int, DlsiteWork?> _works = {};
+
+  /// 作品 id → RJ 号，供排序同步读取。
+  ///
+  /// 编号可能来自元数据、目录名或文件夹登记，必须异步查。排序每帧都要
+  /// 读，所以启动/[loadCodes] 后缓存；未解析的作品先当无编号排在最后。
+  final Map<int, String?> _codes = {};
+
+  /// 补上还没解析过的作品编号，并清掉已消失的作品。
+  ///
+  /// 启动、刷新与手动填编号后调用。只补差集，不给每次刷新都重查全部。
+  Future<void> loadCodes() async {
+    final works = await workDao().listAll();
+    final parsed = <int, String?>{};
+    for (final work in works) {
+      final id = work.id;
+      if (id == null) continue;
+      parsed[id] = _codes.containsKey(id) ? _codes[id] : await codeOf(id);
+    }
+    _codes
+      ..clear()
+      ..addAll(parsed);
+    notifyListeners();
+  }
+
+  /// 同步读已缓存的编号；没解析过就是 null。
+  String? codeSync(int workId) => _codes[workId];
+
+  /// 排序时同步取编号。已缓存就用缓存；新作品还没进缓存时，先从目录名
+  /// 与作品名兜底，避免导入后要重启才排得对。
+  String? codeForWork(Work work) {
+    final id = work.id;
+    if (id != null && _codes.containsKey(id)) return _codes[id];
+    final rootPath = work.rootPath;
+    if (rootPath != null) {
+      final fromPath = _codeInPath(rootPath);
+      if (fromPath != null) return fromPath;
+    }
+    return parseWorkCode(work.name)?.code;
+  }
+
+  /// 从元数据派生的系列索引；只含已导入 ≥2 部的系列。
+  DlsiteSeriesIndex _seriesIndex = DlsiteSeriesIndex.empty;
+
+  DlsiteSeriesIndex get seriesIndex => _seriesIndex;
+
+  DlsiteSeries? seriesForWork(int workId) => _seriesIndex.seriesFor(workId);
+
+  /// 重建系列索引。元数据落库后与启动时调用。
+  Future<void> loadSeriesIndex() async {
+    final rows = await WorkMetadataDao(db()).listAll();
+    _seriesIndex = DlsiteSeriesIndex.fromMetadata(rows);
+    notifyListeners();
+  }
 
   /// 进作品时先把元数据装进内存，详情头就能同步读，不会先闪一下「没抓过」。
   Future<void> prefetch(int workId) async {
@@ -106,6 +160,7 @@ class DlsiteState extends ChangeNotifier {
     await WorkMetadataDao(db()).upsert(WorkMetadata(workId: workId, rjCode: text));
     _metadata.remove(workId);
     _works.remove(workId);
+    _codes[workId] = text;
     await prefetch(workId);
     notifyListeners();
     return text;
@@ -128,6 +183,7 @@ class DlsiteState extends ChangeNotifier {
       _works.remove(workId);
       await prefetch(workId);
       notifyListeners();
+      await loadSeriesIndex();
     }
     return result;
   }
@@ -141,7 +197,9 @@ class DlsiteState extends ChangeNotifier {
     if (result.ok) {
       _metadata.remove(workId);
       _works.remove(workId);
+      _codes[workId] = code;
       notifyListeners();
+      await loadSeriesIndex();
       await onRefresh?.call();
     }
     return result;
@@ -157,7 +215,9 @@ class DlsiteState extends ChangeNotifier {
         await DlsiteRepository(db(), api: api).apply(workId, work, applyCover: applyCover);
     _metadata.remove(workId);
     _works.remove(workId);
+    _codes[workId] = await codeOf(workId);
     notifyListeners();
+    await loadSeriesIndex();
     await onRefresh?.call();
     return DlsiteFetchResult(work: work, grantedTags: granted);
   }

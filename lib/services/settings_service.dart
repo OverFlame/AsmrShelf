@@ -324,6 +324,20 @@ class SettingsService {
     await _save();
   }
 
+  /// 抓 DLsite 用的 HTTP 代理，空串表示直连。存的是规范化后的
+  /// `http://host:port`，不存用户原始输入。
+  String get dlsiteProxy => (_data['dlsite_proxy'] as String?) ?? '';
+
+  Future<void> setDlsiteProxy(String proxy) async {
+    final value = proxy.trim();
+    if (value.isEmpty) {
+      _data.remove('dlsite_proxy');
+    } else {
+      _data['dlsite_proxy'] = value;
+    }
+    await _save();
+  }
+
   /// 上一次自动导入的时间（毫秒时间戳），没有跑过时为 null。
   int? get lastAutoImportAt => _data['last_auto_import_at'] as int?;
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -42,16 +43,10 @@ class FakeTransport implements DlsiteTransport {
 
 /// 测试不等待 10 秒节流与退避。
 DlsiteApi buildApi(FakeTransport transport, {int maxAttempts = 1}) => DlsiteApi(
-      transport: transport,
-      limiter: DlsiteRateLimiter(
-        minInterval: Duration.zero,
-        sleep: (_) async {},
-      ),
-      retry: DlsiteRetryPolicy(
-        maxAttempts: maxAttempts,
-        baseDelay: Duration.zero,
-      ),
-    );
+  transport: transport,
+  limiter: DlsiteRateLimiter(minInterval: Duration.zero, sleep: (_) async {}),
+  retry: DlsiteRetryPolicy(maxAttempts: maxAttempts, baseDelay: Duration.zero),
+);
 
 void main() {
   group('正常响应', () {
@@ -61,13 +56,19 @@ void main() {
       expect(work, isNotNull);
       expect(work!.workNo, 'RJ294126');
       expect(work.title, '作品名');
-      expect(transport.urls.single.toString(),
-          'https://www.dlsite.com/maniax/api/=/product.json?workno=RJ294126');
+      expect(
+        transport.urls.single.toString(),
+        'https://www.dlsite.com/maniax/api/=/product.json?workno=RJ294126',
+      );
     });
 
-    test('空数组表示没有这个作品，返回 null 而不是抛错', () async {
+    test('空数组给出「空数据」提示，而不是笼统的没找到', () async {
       final transport = FakeTransport([const DlsiteResponse(200, '[]')]);
-      expect(await buildApi(transport).fetchWork('RJ294126'), isNull);
+      await expectLater(
+        buildApi(transport).fetchWork('RJ294126'),
+        throwsA(isA<DlsiteException>()
+            .having((e) => e.message, 'message', contains('空数据'))),
+      );
     });
 
     test('404 同样当没找到', () async {
@@ -97,8 +98,7 @@ void main() {
       final transport = FakeTransport([const DlsiteResponse(500, 'oops')]);
       await expectLater(
         buildApi(transport).fetchWork('RJ294126'),
-        throwsA(isA<DlsiteException>()
-            .having((e) => e.status, 'status', 500)),
+        throwsA(isA<DlsiteException>().having((e) => e.status, 'status', 500)),
       );
     });
 
@@ -115,8 +115,7 @@ void main() {
       final transport = FakeTransport([const DlsiteResponse(503, 'busy')]);
       await expectLater(
         buildApi(transport, maxAttempts: 3).fetchWork('RJ294126'),
-        throwsA(isA<DlsiteException>()
-            .having((e) => e.status, 'status', 503)),
+        throwsA(isA<DlsiteException>().having((e) => e.status, 'status', 503)),
       );
       expect(transport.calls, 3);
     });
@@ -126,19 +125,51 @@ void main() {
         const DlsiteResponse(503, 'busy'),
         const DlsiteResponse(200, okBody),
       ]);
-      final work = await buildApi(transport, maxAttempts: 3).fetchWork('RJ294126');
+      final work = await buildApi(
+        transport,
+        maxAttempts: 3,
+      ).fetchWork('RJ294126');
       expect(work, isNotNull);
       expect(transport.calls, 2);
     });
 
     test('超时抛不带状态码的异常', () async {
-      final transport =
-          FakeTransport([TimeoutException('连接超时', Duration.zero)]);
+      final transport = FakeTransport([
+        TimeoutException('连接超时', Duration.zero),
+      ]);
       await expectLater(
         buildApi(transport).fetchWork('RJ294126'),
-        throwsA(isA<DlsiteException>()
-            .having((e) => e.status, 'status', isNull)),
+        throwsA(
+          isA<DlsiteException>().having((e) => e.status, 'status', isNull),
+        ),
       );
+    });
+
+    test('连接错误也重试：两次失败后第三次成功', () async {
+      final transport = FakeTransport([
+        TimeoutException('连接超时', Duration.zero),
+        const SocketException('DNS 失败'),
+        const DlsiteResponse(200, okBody),
+      ]);
+      final work = await buildApi(
+        transport,
+        maxAttempts: 3,
+      ).fetchWork('RJ294126');
+      expect(work, isNotNull);
+      expect(transport.calls, 3);
+    });
+
+    test('连接错误重试用尽后抛最后一次的无状态码异常', () async {
+      final transport = FakeTransport([
+        TimeoutException('连接超时', Duration.zero),
+      ]);
+      await expectLater(
+        buildApi(transport, maxAttempts: 3).fetchWork('RJ294126'),
+        throwsA(
+          isA<DlsiteException>().having((e) => e.status, 'status', isNull),
+        ),
+      );
+      expect(transport.calls, 3);
     });
 
     test('非法 JSON 与 HTML 错误页都报「不是预期的商品结构」', () async {
@@ -146,8 +177,13 @@ void main() {
         final transport = FakeTransport([DlsiteResponse(200, body)]);
         await expectLater(
           buildApi(transport).fetchWork('RJ294126'),
-          throwsA(isA<DlsiteException>().having(
-              (e) => e.message, 'message', contains('不是预期的商品结构'))),
+          throwsA(
+            isA<DlsiteException>().having(
+              (e) => e.message,
+              'message',
+              contains('不是预期的商品结构'),
+            ),
+          ),
           reason: '响应体开头：${body.substring(0, 8)}',
         );
       }
@@ -160,6 +196,43 @@ void main() {
         throwsA(isA<DlsiteException>()),
       );
       expect(transport.calls, 0);
+    });
+  });
+
+  group('代理', () {
+    test('留空表示直连', () {
+      expect(normalizeDlsiteProxy('   '), isEmpty);
+      expect(proxyDirectiveFor(''), 'DIRECT');
+    });
+
+    test('不带协议的 host:port 补成 http', () {
+      expect(normalizeDlsiteProxy('127.0.0.1:7897'), 'http://127.0.0.1:7897');
+      expect(proxyDirectiveFor('127.0.0.1:7897'), 'PROXY 127.0.0.1:7897');
+    });
+
+    test('保留 https 代理与尾部斜杠会被去掉', () {
+      expect(
+        normalizeDlsiteProxy(' https://proxy.example:8443/ '),
+        'https://proxy.example:8443',
+      );
+      expect(
+        proxyDirectiveFor('https://proxy.example:8443/'),
+        'PROXY proxy.example:8443',
+      );
+    });
+
+    test('拒绝 SOCKS、带路径和带账号的地址', () {
+      for (final bad in [
+        'socks5://127.0.0.1:7897',
+        'http://127.0.0.1:7897/proxy',
+        'http://user:pass@127.0.0.1:7897',
+      ]) {
+        expect(
+          () => normalizeDlsiteProxy(bad),
+          throwsFormatException,
+          reason: bad,
+        );
+      }
     });
   });
 }

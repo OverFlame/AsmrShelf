@@ -21,6 +21,7 @@ import '../services/dlsite/dlsite_api.dart';
 import '../services/dlsite/dlsite_cover.dart';
 import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
+import '../services/dlsite/series_index.dart';
 import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
 import '../services/plan_importer.dart';
@@ -108,6 +109,14 @@ class AppState extends ChangeNotifier {
   void enterWorkSelectionMode() => library.enterWorkSelectionMode();
   void clearWorkSelection() => library.clearWorkSelection();
   void selectAllWorks() => library.selectAllWorks();
+  bool isSeriesSelected(DlsiteSeries series) =>
+      library.isSeriesSelected(series);
+  bool isSeriesPartiallySelected(DlsiteSeries series) =>
+      library.isSeriesPartiallySelected(series);
+  void toggleSeriesSelect(DlsiteSeries series) =>
+      library.toggleSeriesSelect(series);
+  void enterSeriesSelection(DlsiteSeries series) =>
+      library.enterSeriesSelection(series);
 
   TagFilter get tagFilter => tags.tagFilter;
   String get advancedFilter => tags.advancedFilter;
@@ -217,10 +226,11 @@ class AppState extends ChangeNotifier {
   /// 多媒体库是否降序。
   bool get visualSortDescending => settings.visualSortDescending;
 
-  /// 作品层可用的排序字段。作品没有文件大小与修改时间，只留名称与加入时间。
+  /// 作品层可用的排序字段。作品没有文件大小与修改时间，只留名称、加入时间与编号。
   static const Map<String, String> worksSortLabels = {
     'name': '文件名',
     'added': '加入时间',
+    'code': 'RJ 号',
   };
 
   /// 作品层排序独立于文件层：默认按加入时间倒序，与列表原有的「新作品在前」一致。
@@ -242,12 +252,26 @@ class AppState extends ChangeNotifier {
   }
 
   /// 作品层排序比较器。同值时按加入时间、id 兜底，降序整体取负。
+  ///
+  /// `code` 走已缓存的 RJ/VJ 号；没有编号的作品无论升序还是降序都排最后。
   int Function(Work, Work) get worksComparator {
     final key = worksSortKey;
     final desc = worksSortDescending;
     return (a, b) {
       int cmp;
-      if (key == 'added') {
+      if (key == 'code') {
+        final aCode = _codeNumber(dlsite.codeForWork(a));
+        final bCode = _codeNumber(dlsite.codeForWork(b));
+        if (aCode == null && bCode == null) {
+          cmp = 0;
+        } else if (aCode == null) {
+          return 1;
+        } else if (bCode == null) {
+          return -1;
+        } else {
+          cmp = aCode.compareTo(bCode);
+        }
+      } else if (key == 'added') {
         cmp = a.createdAt.compareTo(b.createdAt);
       } else {
         cmp = naturalCompare(a.name, b.name);
@@ -256,6 +280,29 @@ class AppState extends ChangeNotifier {
       if (cmp == 0) cmp = (a.id ?? 0).compareTo(b.id ?? 0);
       return desc ? -cmp : cmp;
     };
+  }
+
+  /// 从 `RJ01234567` / `VJ01234567` 里取数字部分；没有编号返回 null。
+  int? _codeNumber(String? code) {
+    if (code == null || code.length < 3) return null;
+    return int.tryParse(code.substring(2));
+  }
+
+  /// 已导入 ≥2 部的系列。
+  List<DlsiteSeries> get seriesGroups => dlsite.seriesIndex.groups;
+
+  /// 当前停靠的系列；不在系列页时为 null。
+  DlsiteSeries? get currentSeries => library.currentSeries;
+
+  /// 当前系列页要展示的作品；首页或作品页时就是全部作品。
+  List<Work> get visibleWorks {
+    final series = library.currentSeries;
+    if (series == null) return library.works;
+    final ids = series.workIds.toSet();
+    return [
+      for (final work in library.works)
+        if (ids.contains(work.id)) work,
+    ];
   }
 
   /// 当前视觉库的排序比较器。
@@ -404,6 +451,8 @@ class AppState extends ChangeNotifier {
     await loadRecentTracks();
     await loadCoverCacheLimit();
     await refresh();
+    await dlsite.loadCodes();
+    await dlsite.loadSeriesIndex();
     logInfo('AppState', 'Initialized OK');
     // 启动后的自动导入不挡界面：先让首页画出来，再在后台扫目录。
     unawaited(autoImportOnStartup());
@@ -721,10 +770,17 @@ class AppState extends ChangeNotifier {
   Future<void> enterWork(int workId) async {
     final work = await _workDao.getById(workId);
     if (work == null) return;
-    library.showWork(work);
+    // 从系列页进的，面包屑保留系列；从首页进的就没有系列节点。
+    library.showWork(work, series: library.currentSeries);
     // 元数据先装进内存，详情头同步读，省一次闪烁。
     await dlsite.prefetch(workId);
     library.setCurrentWork(await _workDao.getById(workId) ?? work);
+    await refresh();
+  }
+
+  /// 点开系列「大作品」，进入与全部作品页相同的封面视图。
+  Future<void> enterSeries(DlsiteSeries series) async {
+    library.showSeries(series);
     await refresh();
   }
 
@@ -745,8 +801,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> goUp() async {
     if (library.currentFolderId == null) {
-      // 作品层再往上就是全部作品。以前的实现是重新进入同一部作品，
-      // 按返回箭头等于原地刷新。
+      final work = library.currentWork;
+      final series = library.currentSeries;
+      if (work != null && series != null) {
+        // 作品根再往上回到系列书套，而不是直接回首页。
+        await enterSeries(series);
+        return;
+      }
+      // 作品层或系列层再往上就是全部作品。
       await goHome();
       return;
     }
@@ -912,7 +974,28 @@ class AppState extends ChangeNotifier {
     } else {
       await refresh();
     }
+    await dlsite.loadSeriesIndex();
+    await _syncCurrentSeriesAfterDelete();
     return deleted;
+  }
+
+  /// 删作品后重建系列索引；当前系列掉到 1 部以下就退出书套回首页。
+  Future<void> _syncCurrentSeriesAfterDelete() async {
+    if (library.currentSeries == null) return;
+    final key = library.currentSeries?.key;
+    DlsiteSeries? match;
+    for (final series in dlsite.seriesIndex.groups) {
+      if (series.key == key) {
+        match = series;
+        break;
+      }
+    }
+    if (match == null) {
+      await goHome();
+    } else {
+      library.currentSeries = match;
+      notifyListeners();
+    }
   }
 
   /// 深度删除某文件夹会移除多少条媒体记录（删除前用来提示用户）。
@@ -1415,9 +1498,7 @@ class AppState extends ChangeNotifier {
     }
     if (rows.isNotEmpty) added += await _mediaDao.insertRows(rows);
     // 失联行：库里登记在这部作品下、磁盘上已经没有的音频
-    final existing = await _mediaDao.queryByDirs([
-      root,
-    ], type: MediaType.audio);
+    final existing = await _mediaDao.queryByDirs([root], type: MediaType.audio);
     final stale = <String>[];
     for (final item in existing) {
       if (!await File(item.path).exists()) stale.add(item.path);
@@ -1576,6 +1657,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 抓 DLsite 用的 HTTP 代理，空串表示直连。传输层每次请求时现读。
+  String get dlsiteProxy => SettingsService.instance.dlsiteProxy;
+
+  Future<void> setDlsiteProxy(String proxy) async {
+    await SettingsService.instance.setDlsiteProxy(proxy);
+    notifyListeners();
+  }
+
   Future<void> setAutoImportEnabled(bool enabled) async {
     await SettingsService.instance.setAutoImportEnabled(enabled);
     notifyListeners();
@@ -1605,10 +1694,9 @@ class AppState extends ChangeNotifier {
 
   /// 扫一遍所有根目录，返回待确认的候选。只读，不落库。
   Future<List<AutoImportCandidate>> scanAutoImportCandidates() {
-    return AutoImportScanner(DatabaseManager.instance.db).scan(
-      roots: autoImportRoots,
-      ignored: autoImportIgnored,
-    );
+    return AutoImportScanner(
+      DatabaseManager.instance.db,
+    ).scan(roots: autoImportRoots, ignored: autoImportIgnored);
   }
 
   /// 落库用户勾选的候选：新建作品走导入计划，有新文件的作品走按盘刷新。
@@ -1633,16 +1721,15 @@ class AppState extends ChangeNotifier {
             skipped++;
             continue;
           }
-          final outcome = await PlanImporter(DatabaseManager.instance.db).apply(
-            ImportPlan(rootPath: c.dirPath, works: [work]),
-          );
+          final outcome = await PlanImporter(
+            DatabaseManager.instance.db,
+          ).apply(ImportPlan(rootPath: c.dirPath, works: [work]));
           created += outcome.worksCreated;
           skipped += outcome.worksSkipped;
           inserted += outcome.tracksInserted;
           insertedSkipped += outcome.tracksSkipped;
           createdIds.addAll(outcome.createdWorkIds);
-        } else if (c.state == AutoImportState.newTracks &&
-            c.workId != null) {
+        } else if (c.state == AutoImportState.newTracks && c.workId != null) {
           final work = await _workDao.getById(c.workId!);
           if (work == null) {
             skipped++;
@@ -1658,10 +1745,7 @@ class AppState extends ChangeNotifier {
         );
       }
       await refresh();
-      logInfo(
-        'AppState',
-        '确认导入：新建 $created 部，新增 $inserted 首，跳过 $skipped 部',
-      );
+      logInfo('AppState', '确认导入：新建 $created 部，新增 $inserted 首，跳过 $skipped 部');
       if (createdIds.isNotEmpty &&
           SettingsService.instance.autoScrapeAfterImport) {
         dlsite.enqueueScrape(createdIds);

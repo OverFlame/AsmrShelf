@@ -44,6 +44,8 @@ class _DlsitePreviewDialogState extends State<_DlsitePreviewDialog> {
       if ((work.titleKana ?? '').isNotEmpty) ('假名', work.titleKana!),
       if ((work.makerName ?? '').isNotEmpty) ('社团', work.makerName!),
       if ((work.seriesName ?? '').isNotEmpty) ('系列', work.seriesName!),
+      if ((work.seriesId ?? '').isNotEmpty) ('系列 ID', work.seriesId!),
+      if ((work.titleWorkCount ?? 0) > 0) ('系列总数', '共 ${work.titleWorkCount} 部'),
       if ((work.workType ?? '').isNotEmpty) ('类型', work.workType!),
       if ((work.ageCategory ?? '').isNotEmpty) ('年龄分级', work.ageCategory!),
       if ((work.releaseDate ?? '').isNotEmpty) ('发售日', work.releaseDate!),

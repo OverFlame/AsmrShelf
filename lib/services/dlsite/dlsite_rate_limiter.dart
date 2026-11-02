@@ -66,8 +66,10 @@ class DlsiteRetryPolicy {
   final Duration baseDelay;
 
   /// 429 表示限流、503 表示服务暂不可用，都可以等一会儿再来；
+  /// 状态码为 null 表示连接层失败（DNS、超时、TLS 握手），也值得重试。
   /// 其它 4xx（尤其 403）重试没有意义。
-  bool shouldRetry(int? status) => status == 429 || status == 503;
+  bool shouldRetry(int? status) =>
+      status == null || status == 429 || status == 503;
 
   Duration delayFor(int attempt) =>
       baseDelay * (1 << (attempt - 1).clamp(0, 4));

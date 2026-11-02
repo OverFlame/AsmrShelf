@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../db/work_dao.dart';
+import '../services/dlsite/series_index.dart';
+import '../services/media_rules.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/log_util.dart';
@@ -33,29 +35,36 @@ class WorksGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
-    final works = appState.works.where((w) => _libs.contains(w.library)).toList();
-    works.sort(appState.worksComparator);
+    final visible = appState.visibleWorks
+        .where((w) => _libs.contains(w.library))
+        .toList();
+    final entries = _buildEntries(appState, visible);
 
-    if (works.isEmpty) {
+    if (entries.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-                _isAudio ? Icons.album_outlined : Icons.photo_library_outlined,
-                size: 56,
-                color: AppColors.mutedOf(context)),
+              _isAudio ? Icons.album_outlined : Icons.photo_library_outlined,
+              size: 56,
+              color: AppColors.mutedOf(context),
+            ),
             const SizedBox(height: 12),
             Text(
-                '还没有作品',
-                style: TextStyle(
-                    color: AppColors.textSecondaryOf(context), fontSize: 14)),
+              appState.currentSeries == null ? '还没有作品' : '这个系列还没有可显示的作品',
+              style: TextStyle(
+                color: AppColors.textSecondaryOf(context),
+                fontSize: 14,
+              ),
+            ),
             const SizedBox(height: 4),
             Text(
-                _isAudio
-                    ? '在左侧点击「添加文件夹」导入音频，自动生成作品'
-                    : '点击下面的「添加文件夹」导入图片或视频，自动生成作品',
-                style: TextStyle(color: AppColors.mutedOf(context), fontSize: 12)),
+              _isAudio
+                  ? '在左侧点击「添加文件夹」导入音频，自动生成作品'
+                  : '点击下面的「添加文件夹」导入图片或视频，自动生成作品',
+              style: TextStyle(color: AppColors.mutedOf(context), fontSize: 12),
+            ),
             // 音频页的导入入口在左栏，这里不再重复给按钮。
             if (!_isAudio) ...[
               const SizedBox(height: 20),
@@ -66,7 +75,7 @@ class WorksGrid extends StatelessWidget {
                 label: const Text('添加文件夹'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.accent,
-                  side:  BorderSide(color: AppColors.surfaceAltOf(context)),
+                  side: BorderSide(color: AppColors.surfaceAltOf(context)),
                 ),
               ),
               const SizedBox(height: 8),
@@ -86,18 +95,31 @@ class WorksGrid extends StatelessWidget {
       );
     }
 
+    Widget itemAt(int i, {bool row = false}) {
+      final entry = entries[i];
+      if (entry is DlsiteSeries) {
+        return _SeriesCard(
+          key: ValueKey('series-card-${entry.key}'),
+          series: entry,
+          row: row,
+        );
+      }
+      final work = entry as Work;
+      return _WorkCard(
+        key: ValueKey('work-card-${work.id}'),
+        work: work,
+        library: library,
+        row: row,
+      );
+    }
+
     if (appState.viewMode == 'list') {
       return ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: works.length,
+        itemCount: entries.length,
         itemBuilder: (_, i) => Padding(
           padding: const EdgeInsets.only(bottom: 8),
-          child: _WorkCard(
-            key: ValueKey('work-card-${works[i].id}'),
-            work: works[i],
-            library: library,
-            row: true,
-          ),
+          child: itemAt(i, row: true),
         ),
       );
     }
@@ -110,8 +132,7 @@ class WorksGrid extends StatelessWidget {
         final cellWidth =
             (constraints.maxWidth - 32 - spacing * (cols - 1)) / cols;
         // 宽卡片保持 0.82；窄到放不下标题时改为固定留出文字高度，避免溢出。
-        final cellHeight =
-            cellWidth < 120 ? cellWidth + 34 : cellWidth / 0.82;
+        final cellHeight = cellWidth < 120 ? cellWidth + 34 : cellWidth / 0.82;
         return GridView.builder(
           padding: const EdgeInsets.all(16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -120,15 +141,110 @@ class WorksGrid extends StatelessWidget {
             crossAxisSpacing: spacing,
             childAspectRatio: cellWidth / cellHeight,
           ),
-          itemCount: works.length,
-          itemBuilder: (_, i) => _WorkCard(
-            key: ValueKey('work-card-${works[i].id}'),
-            work: works[i],
-            library: library,
-          ),
+          itemCount: entries.length,
+          itemBuilder: (_, i) => itemAt(i),
         );
       },
     );
+  }
+
+  /// 首页把系列书套与散作品混排；系列页只显示该系列成员。
+  List<Object> _buildEntries(AppState appState, List<Work> visible) {
+    final works = List<Work>.from(visible)..sort(appState.worksComparator);
+    if (!_isAudio || appState.currentSeries != null) return works;
+
+    final byId = <int, Work>{
+      for (final work in works)
+        if (work.id != null) work.id!: work,
+    };
+    final groupedIds = <int>{};
+    final entries = <Object>[];
+    for (final series in appState.seriesGroups) {
+      final members = [
+        for (final id in series.workIds)
+          if (byId[id] != null) byId[id]!,
+      ];
+      // 本页签里少于两部的系列不立书套，成员按普通作品显示。
+      if (members.length < 2) continue;
+      groupedIds.addAll(members.map((w) => w.id!));
+      entries.add(series);
+    }
+    for (final work in works) {
+      if (!groupedIds.contains(work.id)) entries.add(work);
+    }
+    entries.sort((a, b) => _compareEntries(appState, a, b));
+    return entries;
+  }
+
+  int _compareEntries(AppState appState, Object a, Object b) {
+    final key = appState.worksSortKey;
+    final desc = appState.worksSortDescending;
+    int cmp;
+    if (key == 'code') {
+      final aCode = _codeNumber(_codeOf(appState, a));
+      final bCode = _codeNumber(_codeOf(appState, b));
+      if (aCode == null && bCode == null) {
+        cmp = 0;
+      } else if (aCode == null) {
+        return 1;
+      } else if (bCode == null) {
+        return -1;
+      } else {
+        cmp = aCode.compareTo(bCode);
+      }
+    } else if (key == 'added') {
+      cmp = _createdAt(appState, a).compareTo(_createdAt(appState, b));
+    } else {
+      cmp = naturalCompare(_nameOf(a), _nameOf(b));
+    }
+    if (cmp == 0) {
+      cmp = _createdAt(appState, a).compareTo(_createdAt(appState, b));
+    }
+    if (cmp == 0) cmp = _idOf(a).compareTo(_idOf(b));
+    return desc ? -cmp : cmp;
+  }
+
+  String _nameOf(Object entry) =>
+      entry is DlsiteSeries ? entry.name : (entry as Work).name;
+
+  int _createdAt(AppState appState, Object entry) {
+    if (entry is Work) return entry.createdAt;
+    var latest = 0;
+    for (final id in (entry as DlsiteSeries).workIds) {
+      final work = _workById(appState, id);
+      if (work != null && work.createdAt > latest) latest = work.createdAt;
+    }
+    return latest;
+  }
+
+  int _idOf(Object entry) {
+    if (entry is Work) return entry.id ?? 0;
+    final series = entry as DlsiteSeries;
+    return series.workIds.isEmpty ? 0 : series.workIds.first;
+  }
+
+  String? _codeOf(AppState appState, Object entry) {
+    if (entry is Work) return appState.dlsite.codeForWork(entry);
+    for (final id in (entry as DlsiteSeries).workIds) {
+      final work = _workById(appState, id);
+      final code = work == null
+          ? appState.dlsite.codeSync(id)
+          : appState.dlsite.codeForWork(work);
+      if (code != null) return code;
+    }
+    return null;
+  }
+
+  int? _codeNumber(String? code) {
+    if (code == null || code.length < 3) return null;
+    return int.tryParse(code.substring(2));
+  }
+
+  Work? _workById(AppState appState, int id) {
+    for (final work in appState.works) {
+      if (work.id == id) return work;
+    }
+    return null;
   }
 
   /// 空态里的导入入口：选目录 -> 按本库落库（走 AppState 现成导入通道）
@@ -166,6 +282,202 @@ class WorksGrid extends StatelessWidget {
   }
 }
 
+/// 系列书套卡：封面叠层 + 已导入/总数徽标。
+///
+/// 点开进入 [AppState.enterSeries]；多选时整组一起选/取消。
+class _SeriesCard extends StatelessWidget {
+  final DlsiteSeries series;
+  final bool row;
+
+  const _SeriesCard({super.key, required this.series, this.row = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final appState = context.watch<AppState>();
+    final selected = appState.isSeriesSelected(series);
+    final partial = appState.isSeriesPartiallySelected(series);
+    final covers = [
+      for (final id in series.workIds)
+        for (final work in appState.works)
+          if (work.id == id && work.coverPath != null) work.coverPath!,
+    ];
+
+    final indicator = Icon(
+      selected
+          ? Icons.check_circle
+          : partial
+          ? Icons.indeterminate_check_box
+          : Icons.radio_button_unchecked,
+      size: row ? 18 : 20,
+      color: selected || partial ? AppColors.accent : Colors.white,
+      shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
+    );
+
+    if (row) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _onTap(appState),
+        onLongPress: () => _onLongPress(appState),
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: [
+              if (appState.workSelectionMode)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: indicator,
+                ),
+              SizedBox(width: 56, height: 56, child: _coverStack(covers)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      series.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.textPrimaryOf(context),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      series.badge,
+                      style: TextStyle(
+                        color: AppColors.mutedOf(context),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: AppColors.mutedOf(context),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => _onTap(appState),
+      onLongPress: () => _onLongPress(appState),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _coverStack(covers),
+                if (appState.workSelectionMode)
+                  Positioned(top: 4, left: 4, child: indicator),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      series.badge,
+                      style: const TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            series.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: AppColors.textPrimaryOf(context),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onTap(AppState appState) {
+    if (appState.workSelectionMode) {
+      appState.toggleSeriesSelect(series);
+    } else {
+      appState.enterSeries(series);
+    }
+  }
+
+  void _onLongPress(AppState appState) {
+    if (!appState.workSelectionMode) appState.enterWorkSelectionMode();
+    appState.enterSeriesSelection(series);
+  }
+
+  Widget _coverStack(List<String> covers) {
+    final shown = covers.take(3).toList();
+    if (shown.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.black26,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: const Icon(
+          Icons.auto_stories_outlined,
+          color: Colors.white38,
+          size: 28,
+        ),
+      );
+    }
+    return Stack(
+      children: [
+        for (var i = shown.length - 1; i > 0; i--)
+          Positioned(
+            left: i * 6.0,
+            top: i * 6.0,
+            right: 0,
+            bottom: 0,
+            child: CoverImage(
+              path: shown[i],
+              width: double.infinity,
+              height: double.infinity,
+              borderRadius: 8,
+            ),
+          ),
+        Positioned(
+          left: 0,
+          top: 0,
+          right: shown.length > 1 ? 6.0 * shown.length : 0,
+          bottom: shown.length > 1 ? 6.0 * shown.length : 0,
+          child: CoverImage(
+            path: shown.first,
+            width: double.infinity,
+            height: double.infinity,
+            borderRadius: 10,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _WorkCard extends StatelessWidget {
   final Work work;
 
@@ -186,7 +498,8 @@ class _WorkCard extends StatelessWidget {
   bool get _playAll => library == null || library == 'audio';
 
   /// 「用外部播放器播放」只在可能含视频的作品上给：外链只推视频。
-  bool get _playExternal => library == null || library == 'audio' || work.library != 'audio';
+  bool get _playExternal =>
+      library == null || library == 'audio' || work.library != 'audio';
 
   @override
   Widget build(BuildContext context) {
@@ -268,15 +581,13 @@ class _WorkCard extends StatelessWidget {
                       color: appState.isWorkSelected(work.id!)
                           ? AppColors.accent
                           : Colors.white,
-                      shadows: const [Shadow(color: Colors.black54, blurRadius: 3)],
+                      shadows: const [
+                        Shadow(color: Colors.black54, blurRadius: 3),
+                      ],
                     ),
                   ),
                 if (!appState.workSelectionMode)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: _menu(context, appState),
-                  ),
+                  Positioned(top: 4, right: 4, child: _menu(context, appState)),
               ],
             ),
           ),
@@ -286,9 +597,10 @@ class _WorkCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-                color: AppColors.textPrimaryOf(context),
-                fontSize: 14,
-                fontWeight: FontWeight.w600),
+              color: AppColors.textPrimaryOf(context),
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -318,7 +630,10 @@ class _WorkCard extends StatelessWidget {
         onSelected: (v) => _onMenu(context, appState, v),
         itemBuilder: (_) => [
           if (_playAll)
-            const PopupMenuItem(value: 'playAll', child: Text('播放全部', style: TextStyle(fontSize: 13))),
+            const PopupMenuItem(
+              value: 'playAll',
+              child: Text('播放全部', style: TextStyle(fontSize: 13)),
+            ),
           if (_playExternal)
             const PopupMenuItem(
               value: 'playExternal',
@@ -342,15 +657,22 @@ class _WorkCard extends StatelessWidget {
           ),
           const PopupMenuDivider(),
           const PopupMenuItem(
-              value: 'delete',
-              child: Text('删除作品', style: TextStyle(fontSize: 13, color: AppColors.danger))),
+            value: 'delete',
+            child: Text(
+              '删除作品',
+              style: TextStyle(fontSize: 13, color: AppColors.danger),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Future<void> _onMenu(
-      BuildContext context, AppState appState, String v) async {
+    BuildContext context,
+    AppState appState,
+    String v,
+  ) async {
     switch (v) {
       case 'playAll':
         await appState.playWorkAll(work.id!);
@@ -360,8 +682,11 @@ class _WorkCard extends StatelessWidget {
         if (context.mounted) showLaunchResult(context, r);
         break;
       case 'rename':
-        final name = await promptText(context,
-            title: '重命名作品', initial: work.name);
+        final name = await promptText(
+          context,
+          title: '重命名作品',
+          initial: work.name,
+        );
         if (name != null && name.isNotEmpty) {
           await appState.renameWork(work.id!, name);
         }
@@ -378,11 +703,14 @@ class _WorkCard extends StatelessWidget {
       case 'delete':
         final count = await appState.countMediaUnderWork(work.id!);
         if (!context.mounted) return;
-        final ok = await confirmDialog(context,
-            title: '删除作品「${work.name}」？',
-            content: '将从软件里移除这个作品、它下面的文件夹，以及其中的 '
-                '$count 条媒体记录（音频、图片、视频、字幕都算）。\n'
-                '磁盘文件不会被删除，之后可以重新导入。');
+        final ok = await confirmDialog(
+          context,
+          title: '删除作品「${work.name}」？',
+          content:
+              '将从软件里移除这个作品、它下面的文件夹，以及其中的 '
+              '$count 条媒体记录（音频、图片、视频、字幕都算）。\n'
+              '磁盘文件不会被删除，之后可以重新导入。',
+        );
         if (ok == true) {
           await appState.deleteWorkDeep(work.id!);
         }

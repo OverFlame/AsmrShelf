@@ -63,6 +63,7 @@ class DlsiteWork {
     this.makerId,
     this.seriesName,
     this.seriesId,
+    this.titleWorkCount,
     this.description,
     this.rating,
     this.ratingCount,
@@ -90,6 +91,9 @@ class DlsiteWork {
   final String? makerId;
   final String? seriesName;
   final String? seriesId;
+
+  /// 系列总数（`title_work_count`）。DLsite 不一定给，取不到就不显示。
+  final int? titleWorkCount;
 
   /// `intro_s`，纯文本，可能带 `○` 审查替换符。
   final String? description;
@@ -203,6 +207,7 @@ class DlsiteWork {
       makerId: map['maker_id']?.toString(),
       seriesName: map['series_name'] as String?,
       seriesId: map['series_id']?.toString(),
+      titleWorkCount: asInt(map['title_work_count']),
       description: map['intro_s'] as String?,
       rating: asInt(map['rate_average_star']),
       ratingCount: asInt(map['rate_count']),

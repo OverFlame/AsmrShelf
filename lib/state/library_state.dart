@@ -8,6 +8,7 @@ import '../db/tag_dao.dart';
 import '../db/track_dao.dart';
 import '../db/work_dao.dart';
 import '../services/media_rules.dart';
+import '../services/dlsite/series_index.dart';
 import '../utils/log_util.dart';
 import 'tag_filter.dart';
 
@@ -60,6 +61,9 @@ class LibraryState extends ChangeNotifier {
   List<Work> works = const [];
   List<VirtualFolder> unassignedFolders = const [];
   Work? currentWork;
+
+  /// 当前停靠的系列（「大作品」）；与 [currentWork] 互斥。
+  DlsiteSeries? currentSeries;
 
   // ── 文件夹导航 ──
   int? currentFolderId;
@@ -196,19 +200,32 @@ class LibraryState extends ChangeNotifier {
 
   void resetToHome() {
     currentWork = null;
+    currentSeries = null;
     currentFolderId = null;
     currentFolder = null;
     currentFolderPath = null;
     breadcrumb = const [];
   }
 
-  void showWork(Work work) {
+  /// 进入系列书套。系列内再点作品才进 [showWork]。
+  void showSeries(DlsiteSeries series) {
+    currentSeries = series;
+    currentWork = null;
+    currentFolderId = null;
+    currentFolder = null;
+    currentFolderPath = null;
+    breadcrumb = [rootCrumb, seriesCrumb(series)];
+  }
+
+  void showWork(Work work, {DlsiteSeries? series}) {
+    currentSeries = series;
     currentWork = work;
     currentFolderId = null;
     currentFolder = null;
     currentFolderPath = null;
     breadcrumb = [
       rootCrumb,
+      if (series != null) seriesCrumb(series),
       VirtualFolder(id: -1, name: work.name, workId: work.id),
     ];
   }
@@ -235,8 +252,13 @@ class LibraryState extends ChangeNotifier {
   static const VirtualFolder rootCrumb =
       VirtualFolder(id: -2, name: '全部作品', library: 'audio');
 
+  /// 系列面包屑节点。id 用 -3，与根、作品、真实文件夹区分。
+  static VirtualFolder seriesCrumb(DlsiteSeries series) =>
+      VirtualFolder(id: -3, name: series.name, library: 'audio');
+
   Future<List<VirtualFolder>> buildBreadcrumb() async {
     final work = currentWork;
+    final series = currentSeries;
     final chain = <VirtualFolder>[];
     var cur = currentFolder;
     while (cur != null) {
@@ -250,6 +272,7 @@ class LibraryState extends ChangeNotifier {
           VirtualFolder(
               id: -1, name: work.name, parentId: null, workId: work.id));
     }
+    if (series != null) chain.insert(0, seriesCrumb(series));
     // 链首固定是全部作品。没有作品归属的文件夹也走这里，不再缺根节点。
     chain.insert(0, rootCrumb);
     return chain;
@@ -348,6 +371,32 @@ class LibraryState extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool isSeriesSelected(DlsiteSeries series) {
+    if (series.workIds.isEmpty) return false;
+    return series.workIds.every(selectedWorkIds.contains);
+  }
+
+  bool isSeriesPartiallySelected(DlsiteSeries series) {
+    final selected = series.workIds.where(selectedWorkIds.contains).length;
+    return selected > 0 && selected < series.workIds.length;
+  }
+
+  /// 系列卡多选：全选时取消全系列，否则把整个系列选上。
+  void toggleSeriesSelect(DlsiteSeries series) {
+    if (isSeriesSelected(series)) {
+      selectedWorkIds.removeAll(series.workIds);
+    } else {
+      selectedWorkIds.addAll(series.workIds);
+    }
+    notifyListeners();
+  }
+
+  void enterSeriesSelection(DlsiteSeries series) {
+    workSelectionMode = true;
+    selectedWorkIds.addAll(series.workIds);
+    notifyListeners();
+  }
+
   void clearWorkSelection() {
     workSelectionMode = false;
     selectedWorkIds.clear();
@@ -355,11 +404,17 @@ class LibraryState extends ChangeNotifier {
   }
 
   /// 选中当前作品列表里的全部（多选工具条的「全选」）。
+  ///
+  /// 系列页只选该系列成员，不会把首页散作品一起选进来。
   void selectAllWorks() {
     workSelectionMode = true;
+    final series = currentSeries;
+    final scoped = series == null
+        ? works
+        : works.where((w) => series.workIds.contains(w.id)).toList();
     selectedWorkIds
       ..clear()
-      ..addAll(works.map((w) => w.id).whereType<int>());
+      ..addAll(scoped.map((w) => w.id).whereType<int>());
     notifyListeners();
   }
 }

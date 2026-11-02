@@ -18,7 +18,6 @@ import 'package:asmrshelf/state/app_state.dart';
 import 'package:asmrshelf/state/player_controller.dart';
 import '../support/test_env.dart';
 
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -30,10 +29,14 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     tmp = await Directory.systemTemp.createTemp('asmrshelf_settings_page');
-    PathProviderPlatform.instance = FakePathProvider(p.join(tmp.path, 'support'));
+    PathProviderPlatform.instance = FakePathProvider(
+      p.join(tmp.path, 'support'),
+    );
     DataDirService.instance.resetCache();
     SettingsService.instance.resetForTest();
-    settingsFile = File(p.join(tmp.path, 'support', 'AsmrShelf', 'settings.json'));
+    settingsFile = File(
+      p.join(tmp.path, 'support', 'AsmrShelf', 'settings.json'),
+    );
     await DatabaseManager.instance.close();
     await DatabaseManager.instance.init();
     player = PlayerController();
@@ -69,7 +72,8 @@ void main() {
   Future<void> settleIo(WidgetTester tester) async {
     for (var i = 0; i < 10; i++) {
       await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 40)));
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
       await tester.pump();
     }
     await tester.pumpAndSettle();
@@ -79,7 +83,8 @@ void main() {
   Future<void> stepIo(WidgetTester tester) async {
     for (var i = 0; i < 6; i++) {
       await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
       await tester.pump();
     }
   }
@@ -107,26 +112,35 @@ void main() {
 
     expect(app.gridColumns, 4);
 
-    await tester.tap(find.byKey(const ValueKey<String>('grid-columns-increase')));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('grid-columns-increase')),
+    );
     await settleIo(tester);
     expect(app.gridColumns, 5);
-    expect(find.byKey(const ValueKey<String>('grid-columns-value')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('grid-columns-value')),
+      findsOneWidget,
+    );
     // 数值与标题都跟着状态走，写盘 await 走完才重建，所以这里必须等 I/O。
     expect(find.text('5'), findsOneWidget);
 
     // 一路加到 10，再加就点不动了
     for (var i = 0; i < 10; i++) {
       final button = tester.widget<IconButton>(
-          find.byKey(const ValueKey<String>('grid-columns-increase')));
+        find.byKey(const ValueKey<String>('grid-columns-increase')),
+      );
       if (button.onPressed == null) break;
-      await tester.tap(find.byKey(const ValueKey<String>('grid-columns-increase')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('grid-columns-increase')),
+      );
       await stepIo(tester);
     }
     expect(app.gridColumns, 10);
     expect(
       tester
           .widget<IconButton>(
-              find.byKey(const ValueKey<String>('grid-columns-increase')))
+            find.byKey(const ValueKey<String>('grid-columns-increase')),
+          )
           .onPressed,
       isNull,
       reason: '到上限后加号必须禁用',
@@ -134,16 +148,20 @@ void main() {
 
     for (var i = 0; i < 10; i++) {
       final button = tester.widget<IconButton>(
-          find.byKey(const ValueKey<String>('grid-columns-decrease')));
+        find.byKey(const ValueKey<String>('grid-columns-decrease')),
+      );
       if (button.onPressed == null) break;
-      await tester.tap(find.byKey(const ValueKey<String>('grid-columns-decrease')));
+      await tester.tap(
+        find.byKey(const ValueKey<String>('grid-columns-decrease')),
+      );
       await stepIo(tester);
     }
     expect(app.gridColumns, 2);
     expect(
       tester
           .widget<IconButton>(
-              find.byKey(const ValueKey<String>('grid-columns-decrease')))
+            find.byKey(const ValueKey<String>('grid-columns-decrease')),
+          )
           .onPressed,
       isNull,
       reason: '到下限后减号必须禁用',
@@ -169,6 +187,11 @@ void main() {
     bigView(tester);
     await pumpPage(tester);
 
+    await tester.dragUntilVisible(
+      find.byKey(const ValueKey<String>('about-entry')),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
     await tester.tap(find.byKey(const ValueKey<String>('about-entry')));
     await tester.pumpAndSettle();
 
@@ -182,7 +205,9 @@ void main() {
     await pumpPage(tester);
     final before = app.thumbEpoch;
 
-    await tester.tap(find.byKey(const ValueKey<String>('clear-thumbnail-cache')));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('clear-thumbnail-cache')),
+    );
     await settleIo(tester);
 
     expect(app.thumbEpoch, before + 1);
@@ -196,35 +221,47 @@ void main() {
     // 默认是自动：滑杆禁用，数值是按封面算出来的（这里没有封面，用默认值）
     expect(app.subtitleOpacityAuto, isTrue);
     expect(
-        tester
-            .widget<Slider>(
-                find.byKey(const ValueKey<String>('subtitle-opacity-slider')))
-            .onChanged,
-        isNull,
-        reason: '自动模式下不该让用户再滑');
-    expect(find.text('${(SubtitleStyle.defaultInactiveOpacity * 100).round()}%'),
-        findsOneWidget);
+      tester
+          .widget<Slider>(
+            find.byKey(const ValueKey<String>('subtitle-opacity-slider')),
+          )
+          .onChanged,
+      isNull,
+      reason: '自动模式下不该让用户再滑',
+    );
+    expect(
+      find.text('${(SubtitleStyle.defaultInactiveOpacity * 100).round()}%'),
+      findsOneWidget,
+    );
 
     // 关掉自动，改成固定
-    await tester.tap(find.byKey(const ValueKey<String>('subtitle-opacity-auto')));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('subtitle-opacity-auto')),
+    );
     await settleIo(tester);
     expect(app.subtitleOpacityAuto, isFalse);
     expect((await readSettings(tester))['subtitle_opacity_auto'], false);
     expect(
-        tester
-            .widget<Slider>(
-                find.byKey(const ValueKey<String>('subtitle-opacity-slider')))
-            .onChanged,
-        isNotNull,
-        reason: '固定模式下必须能滑');
+      tester
+          .widget<Slider>(
+            find.byKey(const ValueKey<String>('subtitle-opacity-slider')),
+          )
+          .onChanged,
+      isNotNull,
+      reason: '固定模式下必须能滑',
+    );
 
     // 滑到最右 → 上限
-    final slider = find.byKey(const ValueKey<String>('subtitle-opacity-slider'));
+    final slider = find.byKey(
+      const ValueKey<String>('subtitle-opacity-slider'),
+    );
     await tester.drag(slider, const Offset(600, 0));
     await settleIo(tester);
     expect(app.subtitleInactiveOpacity, SubtitleStyle.maxInactiveOpacity);
-    expect((await readSettings(tester))['subtitle_inactive_opacity'],
-        SubtitleStyle.maxInactiveOpacity);
+    expect(
+      (await readSettings(tester))['subtitle_inactive_opacity'],
+      SubtitleStyle.maxInactiveOpacity,
+    );
     expect(find.text('80%'), findsOneWidget);
   });
 
@@ -237,22 +274,61 @@ void main() {
     await tester.drag(slider, const Offset(-600, 0));
     await settleIo(tester);
 
-    expect(app.subtitleResumeSeconds,
-        SettingsService.minSubtitleResumeSeconds);
-    expect((await readSettings(tester))['subtitle_resume_seconds'],
-        SettingsService.minSubtitleResumeSeconds);
+    expect(app.subtitleResumeSeconds, SettingsService.minSubtitleResumeSeconds);
+    expect(
+      (await readSettings(tester))['subtitle_resume_seconds'],
+      SettingsService.minSubtitleResumeSeconds,
+    );
     expect(find.text('2 秒'), findsOneWidget);
   });
 
+  testWidgets('DLsite 代理：保存后落盘，格式不对留在对话框', (tester) async {
+    bigView(tester);
+    await pumpPage(tester);
+
+    await tester.tap(find.byKey(const ValueKey<String>('dlsite-proxy-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dlsite-proxy-input')),
+      '127.0.0.1:7897',
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('dlsite-proxy-save')));
+    await settleIo(tester);
+
+    expect(app.dlsiteProxy, 'http://127.0.0.1:7897');
+    expect(
+      (await readSettings(tester))['dlsite_proxy'],
+      'http://127.0.0.1:7897',
+    );
+    expect(find.text('http://127.0.0.1:7897'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey<String>('dlsite-proxy-tile')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('dlsite-proxy-input')),
+      'socks5://127.0.0.1:7897',
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('dlsite-proxy-save')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.textContaining('代理地址要像'), findsOneWidget);
+    expect(app.dlsiteProxy, 'http://127.0.0.1:7897');
+  });
+
   test('关于页写死的版本号与 pubspec.yaml 同步', () async {
-    final pubspec =
-        await File(p.join(Directory.current.path, 'pubspec.yaml')).readAsString();
+    final pubspec = await File(
+      p.join(Directory.current.path, 'pubspec.yaml'),
+    ).readAsString();
     final line = pubspec
         .split('\n')
         .firstWhere((l) => l.startsWith('version:'), orElse: () => '');
     expect(line, isNotEmpty, reason: 'pubspec.yaml 里必须有 version 行');
     final value = line.split(':').last.trim();
-    expect(value, '${AboutPage.appVersion}+${AboutPage.appBuildNumber}',
-        reason: '改 pubspec.yaml 的 version 必须同步 AboutPage 的常量');
+    expect(
+      value,
+      '${AboutPage.appVersion}+${AboutPage.appBuildNumber}',
+      reason: '改 pubspec.yaml 的 version 必须同步 AboutPage 的常量',
+    );
   });
 }

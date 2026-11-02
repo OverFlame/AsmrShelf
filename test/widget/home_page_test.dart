@@ -14,6 +14,7 @@ import 'package:asmrshelf/db/database.dart';
 import 'package:asmrshelf/db/folder_dao.dart';
 import 'package:asmrshelf/db/media_dao.dart';
 import 'package:asmrshelf/db/work_dao.dart';
+import 'package:asmrshelf/db/work_metadata_dao.dart';
 import 'package:asmrshelf/pages/home_page.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
 import 'package:asmrshelf/services/settings_service.dart';
@@ -51,7 +52,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   final pngBytes = base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  );
 
   late Directory tmp;
   late Database db;
@@ -68,7 +70,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     SettingsService.instance.resetForTest();
     tmp = await Directory.systemTemp.createTemp('asmrshelf_home_page');
-    PathProviderPlatform.instance = FakePathProvider(p.join(tmp.path, 'support'));
+    PathProviderPlatform.instance = FakePathProvider(
+      p.join(tmp.path, 'support'),
+    );
     DataDirService.instance.resetCache();
     await DatabaseManager.instance.close();
     await DatabaseManager.instance.init();
@@ -79,12 +83,14 @@ void main() {
 
     // 音频作品 + 一个带路径的卷 + 一条音频媒体行。
     audioWorkId = (await WorkDao(db).create('音频库', library: 'audio')).id!;
-    audioDir =
-        await Directory(p.join(tmp.path, 'media', '曲库')).create(recursive: true);
+    audioDir = await Directory(
+      p.join(tmp.path, 'media', '曲库'),
+    ).create(recursive: true);
     final song = File(p.join(audioDir.path, 'song.mp3'));
     await song.writeAsBytes(const <int>[0, 0, 0, 1]);
-    final audioFolder =
-        await FolderDao(db).create('曲库', workId: audioWorkId, library: 'audio');
+    final audioFolder = await FolderDao(
+      db,
+    ).create('曲库', workId: audioWorkId, library: 'audio');
     audioFolderId = audioFolder.id!;
     await FolderDao(db).addPath(audioFolderId, audioDir.path);
     await MediaDao(db).insertRow({
@@ -96,10 +102,12 @@ void main() {
 
     // 多媒体作品：音频栏不该列出它。
     mediaWorkId = (await WorkDao(db).create('图片库', library: 'media')).id!;
-    final albumDir =
-        await Directory(p.join(tmp.path, 'media', '相册')).create(recursive: true);
-    final album =
-        await FolderDao(db).create('相册', workId: mediaWorkId, library: 'media');
+    final albumDir = await Directory(
+      p.join(tmp.path, 'media', '相册'),
+    ).create(recursive: true);
+    final album = await FolderDao(
+      db,
+    ).create('相册', workId: mediaWorkId, library: 'media');
     await FolderDao(db).addPath(album.id!, albumDir.path);
     final pic = File(p.join(albumDir.path, 'a.png'));
     await pic.writeAsBytes(pngBytes);
@@ -125,7 +133,8 @@ void main() {
   Future<void> settleIo(WidgetTester tester) async {
     for (var i = 0; i < 10; i++) {
       await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 40)));
+        () => Future<void>.delayed(const Duration(milliseconds: 40)),
+      );
       await tester.pump();
     }
     await tester.pumpAndSettle();
@@ -157,8 +166,11 @@ void main() {
     expect(find.byType(WorksGrid), findsOneWidget);
     expect(find.byType(TagPanel), findsOneWidget);
     expect(find.byKey(ValueKey('work-card-$audioWorkId')), findsOneWidget);
-    expect(find.byKey(ValueKey('work-card-$mediaWorkId')), findsNothing,
-        reason: '音频栏不混进多媒体作品');
+    expect(
+      find.byKey(ValueKey('work-card-$mediaWorkId')),
+      findsNothing,
+      reason: '音频栏不混进多媒体作品',
+    );
     expect(find.byType(FolderBrowser), findsNothing);
   });
 
@@ -178,6 +190,76 @@ void main() {
     await tester.tap(find.text('曲库').first);
     await settleIo(tester);
     expect(app.currentFolderPath, audioDir.path);
+  });
+
+  testWidgets('同系列的两部作品合成书套，点进去是系列页，作品返回系列', (tester) async {
+    late int a;
+    late int b;
+    await tester.runAsync(() async {
+      a = (await WorkDao(db).create('雨之一')).id!;
+      b = (await WorkDao(db).create('雨之二')).id!;
+      final metadata = WorkMetadataDao(db);
+      for (final id in [a, b]) {
+        await metadata.upsert(
+          WorkMetadata(
+            workId: id,
+            rjCode: 'RJ0000000$id',
+            rawJson: jsonEncode([
+              {
+                'series_id': 'SRI1',
+                'series_name': '雨の日',
+                'maker_name': '社团',
+                'title_work_count': 3,
+              },
+            ]),
+          ),
+        );
+      }
+      await app.dlsite.loadSeriesIndex();
+      await app.refresh();
+    });
+    wideScreen(tester);
+    await pumpHome(tester);
+
+    final seriesCard = find.byKey(const ValueKey('series-card-id:SRI1'));
+    expect(seriesCard, findsOneWidget);
+    expect(
+      find.byKey(ValueKey('work-card-$a')),
+      findsNothing,
+      reason: '系列成员收进书套，不再平铺',
+    );
+    expect(find.textContaining('雨の日'), findsWidgets, reason: '侧栏也有系列入口');
+
+    await tester.tap(seriesCard);
+    await settleIo(tester);
+    expect(app.currentSeries?.name, '雨の日');
+    expect(find.byKey(const ValueKey('series-title')), findsOneWidget);
+    expect(find.byKey(const ValueKey('series-count')), findsOneWidget);
+    expect(find.byKey(ValueKey('work-card-$a')), findsOneWidget);
+    expect(find.byKey(ValueKey('work-card-$b')), findsOneWidget);
+
+    await tester.tap(find.byKey(ValueKey('work-card-$a')));
+    await settleIo(tester);
+    expect(app.currentWork?.id, a);
+    expect(app.currentSeries?.name, '雨の日', reason: '进作品后仍记得来自哪套系列');
+    expect(find.byType(FolderBrowser), findsOneWidget);
+
+    await tester.tap(find.byTooltip('返回上一级'));
+    await settleIo(tester);
+    expect(app.currentWork, isNull);
+    expect(app.currentSeries?.name, '雨の日');
+    expect(find.byKey(const ValueKey('series-title')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('series-back')));
+    await settleIo(tester);
+    await tester.longPress(find.byKey(const ValueKey('series-card-id:SRI1')));
+    await settleIo(tester);
+    expect(app.workSelectionMode, isTrue);
+    expect(app.selectedWorkIds, {a, b}, reason: '书套多选等于整组作品');
+
+    await tester.tap(find.byKey(const ValueKey('series-card-id:SRI1')));
+    await settleIo(tester);
+    expect(app.selectedWorkIds, isEmpty, reason: '再点一次取消整组');
   });
 
   testWidgets('作品卡片菜单能添加/移除标签（作用于整个作品）', (tester) async {
@@ -273,26 +355,30 @@ void main() {
 
     expect(app.leftWidth, 260);
     expect(find.byKey(const ValueKey('split-left-panel')), findsOneWidget);
-    expect(
-        tester.getSize(find.byType(TagPanel)).width, closeTo(260, 0.5));
+    expect(tester.getSize(find.byType(TagPanel)).width, closeTo(260, 0.5));
 
     await tester.drag(
-        find.byKey(const ValueKey('split-left-panel')), const Offset(80, 0));
+      find.byKey(const ValueKey('split-left-panel')),
+      const Offset(80, 0),
+    );
     await settleIo(tester);
 
-    expect(app.leftWidth, greaterThan(260),
-        reason: '拖动结束后才把宽度写进设置');
+    expect(app.leftWidth, greaterThan(260), reason: '拖动结束后才把宽度写进设置');
     expect(app.leftWidth, lessThanOrEqualTo(420));
-    expect(tester.getSize(find.byType(TagPanel)).width,
-        closeTo(app.leftWidth, 0.5));
+    expect(
+      tester.getSize(find.byType(TagPanel)).width,
+      closeTo(app.leftWidth, 0.5),
+    );
   });
 
   testWidgets('左栏拖不过上限 420，双击恢复默认', (tester) async {
     wideScreen(tester);
     await pumpHome(tester);
 
-    await tester.drag(find.byKey(const ValueKey('split-left-panel')),
-        const Offset(2000, 0));
+    await tester.drag(
+      find.byKey(const ValueKey('split-left-panel')),
+      const Offset(2000, 0),
+    );
     await settleIo(tester);
     expect(app.leftWidth, 420, reason: '上限是 420，不是窗口宽');
 
@@ -314,8 +400,11 @@ void main() {
     await settleIo(tester);
 
     expect(app.leftWidth, 420, reason: '窗口缩放不改用户设置');
-    expect(tester.getSize(find.byType(TagPanel)).width, lessThan(420),
-        reason: '中间至少留 420 像素');
+    expect(
+      tester.getSize(find.byType(TagPanel)).width,
+      lessThan(420),
+      reason: '中间至少留 420 像素',
+    );
   });
 
   testWidgets('窄屏没有分隔条', (tester) async {
@@ -334,12 +423,16 @@ void main() {
     expect(app.libraryHeight, 200);
 
     await tester.drag(
-        find.byKey(const ValueKey('split-library-tags')), const Offset(0, 60));
+      find.byKey(const ValueKey('split-library-tags')),
+      const Offset(0, 60),
+    );
     await settleIo(tester);
     expect(app.libraryHeight, greaterThan(200));
 
-    await tester.drag(find.byKey(const ValueKey('split-library-tags')),
-        const Offset(0, 2000));
+    await tester.drag(
+      find.byKey(const ValueKey('split-library-tags')),
+      const Offset(0, 2000),
+    );
     await settleIo(tester);
     expect(app.libraryHeight, lessThanOrEqualTo(480));
     expect(tester.takeException(), isNull, reason: '标签区不能被作品集挤没');
@@ -353,7 +446,9 @@ void main() {
 
     expect(app.currentWork?.id, audioWorkId);
     final rootCrumb = find.descendant(
-        of: find.byType(FolderBrowser), matching: find.text('全部作品'));
+      of: find.byType(FolderBrowser),
+      matching: find.text('全部作品'),
+    );
     expect(rootCrumb, findsOneWidget);
     expect(app.breadcrumb.first.id, -2, reason: '面包屑最上级是全部作品');
 
@@ -405,8 +500,11 @@ void main() {
     addTearDown(tester.view.reset);
     await pumpHome(tester);
 
-    expect(find.byKey(const ValueKey('split-library-tags')), findsNothing,
-        reason: '放不下就折叠作品集，先保住标签区');
+    expect(
+      find.byKey(const ValueKey('split-library-tags')),
+      findsNothing,
+      reason: '放不下就折叠作品集，先保住标签区',
+    );
     expect(find.text('标签'), findsWidgets);
     expect(tester.takeException(), isNull);
   });

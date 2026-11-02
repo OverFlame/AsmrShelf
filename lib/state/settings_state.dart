@@ -63,6 +63,11 @@ class SettingsState extends ChangeNotifier {
   /// 滑动之后留在原地的秒数。
   int get subtitleResumeSeconds => _subtitleResumeSeconds;
 
+  String _dlsiteProxy = '';
+
+  /// 抓 DLsite 用的 HTTP 代理，空串表示直连。
+  String get dlsiteProxy => _dlsiteProxy;
+
   /// 从磁盘读一次。只赋值，不回写：刚读到的值再写一遍没有意义。
   void load(SettingsService ss) {
     _themeMode = ss.themeMode;
@@ -79,6 +84,7 @@ class SettingsState extends ChangeNotifier {
     _subtitleOpacityAuto = ss.subtitleOpacityAuto;
     _subtitleInactiveOpacity = ss.subtitleInactiveOpacity;
     _subtitleResumeSeconds = ss.subtitleResumeSeconds;
+    _dlsiteProxy = ss.dlsiteProxy;
     notifyListeners();
   }
 
@@ -178,6 +184,12 @@ class SettingsState extends ChangeNotifier {
   Future<void> setViewMode(String mode) async {
     _viewMode = mode == 'list' ? 'list' : 'grid';
     await SettingsService.instance.setViewMode(_viewMode);
+    notifyListeners();
+  }
+
+  Future<void> setDlsiteProxy(String proxy) async {
+    _dlsiteProxy = proxy;
+    await SettingsService.instance.setDlsiteProxy(proxy);
     notifyListeners();
   }
 }
