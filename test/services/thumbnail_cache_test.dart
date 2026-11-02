@@ -2,11 +2,12 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:image/image.dart' as img;
 import 'package:asmrshelf/services/thumbnail_cache.dart';
 
+import '../support/png_bytes.dart';
+
 Future<ui.Image> _tinyImage() async {
-  final raw = img.encodePng(img.Image(width: 2, height: 2));
+  final raw = solidPng(2, 2);
   final codec = await ui.instantiateImageCodec(raw);
   final frame = await codec.getNextFrame();
   return frame.image;
@@ -50,10 +51,8 @@ void main() {
     });
 
     File writeImage(String name, {int size = 8, int r = 255}) {
-      final image = img.Image(width: size, height: size);
-      img.fill(image, color: img.ColorRgb8(r, 0, 0));
       return File('${srcDir.path}/$name')
-        ..writeAsBytesSync(img.encodePng(image));
+        ..writeAsBytesSync(solidPng(size, size, r: r));
     }
 
     /// 把 mtime 推到未来，躲开「同一毫秒内写两次」的粒度问题

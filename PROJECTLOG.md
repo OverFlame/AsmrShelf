@@ -418,3 +418,21 @@ dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--d
 代价：缓存目录里旧的 64 位文件名会变成孤儿文件，占空间但不会读错；需要时用「清理缩略图缓存」按钮清掉。
 
 测试：`test/utils/stable_hash_test.dart` 4 例（确定性、格式、高位码元不撞车、500 条路径无碰撞）。验证：analyze 无问题、`flutter test` 598 例全过、Linux release 构建成功。
+
+## 2026-11-02 去掉 image 依赖：测试自己生成 PNG
+
+阶段一最后一项依赖清理。`image` 从 `dev_dependencies` 完全删掉：它只被 `test/services/thumbnail_cache_test.dart` 用来造样张，而测试需要的是「一张 Flutter 能解码的 PNG」，不是完整的图片库。
+
+替代品是 `test/support/png_bytes.dart` 的 `solidPng(width, height, {r, g, b})`：手写 PNG 的签名、IHDR、IDAT、IEND 四个块，压缩用 `dart:io` 自带的 `ZLibEncoder`，CRC32 自己算。约 60 行，没有第三方依赖。
+
+为什么值得删：`image` 是纯 Dart 的大包，只服务一条测试用例；手写 PNG 的行为还能被测试直接断言（解码成功即证明字节合法）。
+
+至此阶段一的三项依赖全部清完：
+
+| 依赖 | 处理 |
+|---|---|
+| `exif ^3.3.0` | 删除（唯一使用者 `exif_service.dart` 已删） |
+| `crypto ^3.0.7` | 删除（缩略图缓存改用 `lib/utils/stable_hash.dart` 的 FNV-1a） |
+| `image ^4.9.1` | 删除（测试改用 `test/support/png_bytes.dart` 手写 PNG） |
+
+验证：analyze 无问题、`flutter test` 598 例全过、Linux release 构建成功。

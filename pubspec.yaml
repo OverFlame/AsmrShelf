@@ -66,9 +66,6 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  # 只在测试里造 PNG 样张用（缩略图缓存用例），运行时不需要。
-  image: ^4.9.1
-
   # 测试里替换路径提供者，让 DataDirService 的迁移用例跑在临时目录。
   path_provider_platform_interface: ^2.1.3
 
