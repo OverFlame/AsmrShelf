@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 import '../utils/log_util.dart';
 
 /// 虚拟文件夹
@@ -156,9 +156,9 @@ class FolderDao {
   }
 
   Future<int> countChildren(int parentId) async {
-    final count = Sqflite.firstIntValue(await _db.rawQuery(
-        'SELECT COUNT(*) FROM folders WHERE parent = ?', [parentId]));
-    return count ?? 0;
+    final rows = await _db
+        .rawQuery('SELECT COUNT(*) AS c FROM folders WHERE parent = ?', [parentId]);
+    return (rows.first['c'] as num).toInt();
   }
 
   /// 删除文件夹（CASCADE 清理 folder_paths；子文件夹上移为根级）

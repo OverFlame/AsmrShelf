@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../services/media_rules.dart';
 import '../utils/log_util.dart';

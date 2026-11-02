@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 /// 一部作品的 DLsite 元数据，对应 `work_metadata` 一行。
 ///

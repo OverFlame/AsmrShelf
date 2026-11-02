@@ -1,8 +1,20 @@
 import 'dart:developer' as dev;
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+
+/// 等价于 Flutter 的 `kDebugMode`：只有 assert 生效的构建里才是 true。
+///
+/// 不用 `package:flutter/foundation.dart` 的常量，是为了让日志工具保持纯 Dart：
+/// `tool/import_cli.dart` 这类命令行入口要能在没有 Flutter 引擎时跑（`dart run`）。
+bool get _isDebugMode {
+  var debug = false;
+  assert(() {
+    debug = true;
+    return true;
+  }());
+  return debug;
+}
 
 /// 统一日志工具 — 输出到 [dart:developer.log]（控制台 + DevTools）；
 /// 调过 [LogUtil.attachFileSink] 之后再落一份到 `<dataDir>/logs/`，
@@ -47,7 +59,7 @@ class _LogUtil {
   static final _LogUtil instance = _LogUtil._();
   _LogUtil._();
 
-  bool showDebug = kDebugMode;
+  bool showDebug = _isDebugMode;
 
   /// 单个日志文件的轮转上限，超过就改名成 `.1` 重开。
   static const int defaultMaxFileBytes = 2 * 1024 * 1024;
@@ -122,7 +134,8 @@ class _LogUtil {
           error: level == Log.error ? data : null,
           time: DateTime.now());
     } catch (_) {
-      debugPrint(line);
+      // 没有 Flutter 引擎（命令行入口）时退回 stdout。
+      stdout.writeln(line);
     }
 
     _appendToFile(line);

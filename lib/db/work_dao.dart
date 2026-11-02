@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 import '../utils/log_util.dart';
 
 /// 作品集：音频库是专辑，视频库是剧集

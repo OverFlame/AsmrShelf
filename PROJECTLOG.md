@@ -310,3 +310,32 @@
 `ImportOutcome` 分开数四种：新建作品、跳过作品、新增曲目、已存在曲目。
 
 验证：analyze 无问题、`flutter test` 560 例全过。
+
+## 2026-11-02 一次性导入工具（命令行）
+
+`tool/import_cli.dart`：
+
+```text
+dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--dry-run]
+```
+
+先扫描并打印「几部作品、几首曲目、每部的编号与封面层级、跳过哪些没有音频的目录」，`--db` 指向应用建好的库文件才会写入。库版本不是 v1 时拒绝写入。
+
+### 为让命令行跑起来改的三处
+
+| 问题 | 处理 |
+|---|---|
+| `package:sqflite` 会经 `flutter/foundation` 拉 `dart:ui`，`dart run` 直接编译失败 | DAO 改为 `package:sqflite_common/sqlite_api.dart`（同一套接口，不绑 Flutter）；`lib/db/database.dart` 仍用 `package:sqflite`，它本来就是 Flutter 侧入口 |
+| `folder_dao.dart` 用 `Sqflite.firstIntValue`（Flutter 版工具函数） | 改成 `SELECT COUNT(*) AS c` 再读列 |
+| `lib/utils/log_util.dart` 用 `kDebugMode` 与 `debugPrint` | 用 `assert` 自造 `_isDebugMode`，回退输出改 `stdout.writeln`；日志工具从此是纯 Dart |
+
+### 实测（临时目录两个作品三个音频）
+
+| 步骤 | 结果 |
+|---|---|
+| 干跑 | `2 部作品，3 首曲目`，`作品A [RJ294126] 2 首 无封面`、`普通作品 1 首 无封面`、跳过 1 个空目录 |
+| 第一次写入 | `ImportOutcome(作品 2 新建 / 0 跳过, 曲目 3 新增 / 0 已存在)` |
+| 第二次写入 | `ImportOutcome(作品 0 新建 / 2 跳过, 曲目 0 新增 / 0 已存在)` |
+| 库内容 | `works` 两行且 `root_path` 为绝对路径；`media` 三行；`work_metadata` 只有 RJ294126 那一行 |
+
+验证：analyze 无问题、`flutter test` 560 例全过。

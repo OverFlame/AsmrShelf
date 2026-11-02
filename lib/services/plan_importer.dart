@@ -5,7 +5,7 @@
 /// 作品：靠 `works.root_path` 判重。
 library;
 
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_common/sqlite_api.dart';
 
 import '../db/folder_dao.dart';
 import '../db/media_dao.dart';
