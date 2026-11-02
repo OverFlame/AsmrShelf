@@ -28,34 +28,22 @@ import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
 import 'import_state.dart';
+import 'tag_filter.dart';
 import 'settings_state.dart';
+import 'tag_state.dart';
+
+export 'tag_filter.dart';
 import '../services/subtitle_parser.dart';
 import '../services/subtitle_service.dart';
 import '../services/thumbnail_cache.dart';
 import '../services/video_launcher.dart';
 import '../services/volume_cover_service.dart';
-import '../utils/filter_expression.dart';
 import '../utils/image_cache_util.dart';
 import '../utils/log_util.dart';
 import '../utils/progress_throttle.dart';
 import 'player_controller.dart';
 
 /// 标签筛选规则
-class TagFilter {
-  final List<int> andTagIds;
-  final List<int> orTagIds;
-  final List<int> notTagIds;
-
-  const TagFilter({
-    this.andTagIds = const [],
-    this.orTagIds = const [],
-    this.notTagIds = const [],
-  });
-
-  bool get active =>
-      andTagIds.isNotEmpty || orTagIds.isNotEmpty || notTagIds.isNotEmpty;
-}
-
 /// 应用状态 — 作品集 / 文件夹导航 / 曲目 / 标签 / 导入 / 播放
 class AppState extends ChangeNotifier {
   final PlayerController player;
@@ -107,13 +95,13 @@ class AppState extends ChangeNotifier {
   String _searchQuery = '';
   String get searchQuery => _searchQuery;
 
-  // ── 标签 ──
-  List<Tag> _allTags = [];
-  List<Tag> get allTags => _allTags;
-  final Map<int, List<Tag>> _trackTags = {};
-  final Map<int, List<Tag>> _imageTags = {};
-  /// 每个曲目的标签切换排队串行执行，见 [toggleTagOnTrack]。
-  final Map<int, Future<void>> _tagToggleChains = {};
+  // ── 标签（数据与逻辑在 TagState）──
+  final TagState tags = TagState(
+    tagDao: () => TagDao(DatabaseManager.instance.db),
+    folderDao: () => FolderDao(DatabaseManager.instance.db),
+    trackDao: () => TrackDao(DatabaseManager.instance.db),
+  );
+
   // ── 曲目多选 ──
   final Set<int> _selectedTrackIds = {};
   /// 只读视图：调用方拿不到内部集合，改不到选中状态。
@@ -122,11 +110,9 @@ class AppState extends ChangeNotifier {
   bool _selectionMode = false;
   bool get selectionMode => _selectionMode;
   bool isTrackSelected(int id) => _selectedTrackIds.contains(id);
-  TagFilter _tagFilter = const TagFilter();
-  TagFilter get tagFilter => _tagFilter;
-  String _advancedFilter = '';
-  String get advancedFilter => _advancedFilter;
-  bool get hasAdvancedFilter => _advancedFilter.trim().isNotEmpty;
+  TagFilter get tagFilter => tags.tagFilter;
+  String get advancedFilter => tags.advancedFilter;
+  bool get hasAdvancedFilter => tags.hasAdvancedFilter;
 
 
   // ── 图片视图设置 ──
@@ -342,7 +328,11 @@ class AppState extends ChangeNotifier {
     required this.player,
     VideoLauncher? videoLauncher,
     this.dlsiteApi,
-  }) : _launcher = videoLauncher ?? VideoLauncher();
+  }) : _launcher = videoLauncher ?? VideoLauncher() {
+    // 标签状态只通知界面重画；筛选变了要让列表重查，所以把 refresh 注进去。
+    tags.addListener(notifyListeners);
+    tags.onRefresh = refresh;
+  }
 
 
   Future<void> init() async {
@@ -361,93 +351,14 @@ class AppState extends ChangeNotifier {
     // 规则标签只放定义行，筛选时翻成列条件（BUILD_GUIDE 第 18.4 节）。
     await _tagDao.ensureRuleTags(extNames: _ruleTagExtensions);
     await loadTags();
-    await _initNotTagIds();
-    await _initCollapsedNamespaces();
+    await tags.initNotTagIds();
+    await tags.initCollapsedNamespaces();
     await loadRecentTracks();
     await loadCoverCacheLimit();
     await refresh();
     // 存量老库没有默认封面：后台补一次，不挡首屏。
     unawaited(backfillAutoCovers());
     logInfo('AppState', 'Initialized OK');
-  }
-
-  /// 默认排除「字幕」这类规则标签，并把排除集持久化（BUILD_GUIDE 第 18.5 节）。
-  ///
-  /// 字幕照常入库，只是默认不进列表；用户改过排除集就不再套用默认值。
-  Future<void> _initNotTagIds() async {
-    final settings = SettingsService.instance;
-    final stored = settings.excludedTagIds;
-    if (stored != null) {
-      if (stored.isNotEmpty) {
-        _tagFilter = TagFilter(notTagIds: stored);
-      }
-      return;
-    }
-    final kindIds = _allTags
-        .where((t) =>
-            t.namespace == TagDao.kindNamespace &&
-            t.name == MediaType.subtitle.value)
-        .map((t) => t.id)
-        .whereType<int>()
-        .toList();
-    await settings.setExcludedTagIds(kindIds);
-    if (kindIds.isNotEmpty) {
-      _tagFilter = TagFilter(notTagIds: kindIds);
-    }
-  }
-
-  /// 排除集每次变动都落盘，重启后保持。
-  void _persistNotTagIds() {
-    unawaited(
-        SettingsService.instance.setExcludedTagIds(_tagFilter.notTagIds));
-  }
-
-  // ── 标签面板折叠的命名空间 ──
-
-  final Set<String> _collapsedNamespaces = {};
-
-  /// 折叠起来的命名空间（标签面板据此只画标题行）。
-  Set<String> get collapsedNamespaces =>
-      UnmodifiableSetView(_collapsedNamespaces);
-
-  bool isNamespaceCollapsed(String namespace) =>
-      _collapsedNamespaces.contains(namespace);
-
-  /// 首次启动折叠扩展名那一组：那是按文件后缀自动生成的规则标签，几十个，
-  /// 不折叠会盖住用户自己打的标签。用户改过就按用户存的来。
-  Future<void> _initCollapsedNamespaces() async {
-    final stored = SettingsService.instance.collapsedTagNamespaces;
-    if (stored != null) {
-      _collapsedNamespaces
-        ..clear()
-        ..addAll(stored);
-      return;
-    }
-    _collapsedNamespaces.add(TagDao.extNamespace);
-    await SettingsService.instance
-        .setCollapsedTagNamespaces(_collapsedNamespaces.toList());
-  }
-
-  void toggleNamespaceCollapsed(String namespace) {
-    if (!_collapsedNamespaces.remove(namespace)) {
-      _collapsedNamespaces.add(namespace);
-    }
-    unawaited(SettingsService.instance
-        .setCollapsedTagNamespaces(_collapsedNamespaces.toList()));
-    notifyListeners();
-  }
-
-  /// 展开或折叠当前已有的全部命名空间（标签面板的「全部折叠/展开」）。
-  void setAllNamespacesCollapsed(bool collapsed) {
-    final all = _allTags.map((t) => t.namespace).toSet();
-    if (collapsed) {
-      _collapsedNamespaces.addAll(all);
-    } else {
-      _collapsedNamespaces.removeAll(all);
-    }
-    unawaited(SettingsService.instance
-        .setCollapsedTagNamespaces(_collapsedNamespaces.toList()));
-    notifyListeners();
   }
 
   // ═══════════════ 设置 ═══════════════
@@ -592,8 +503,7 @@ class AppState extends ChangeNotifier {
     if (list.isEmpty) return 0;
     final deleted = await _mediaDao.deleteByIds(list);
     for (final id in list) {
-      _trackTags.remove(id);
-      _imageTags.remove(id);
+      tags.clearCaches();
       _selectedTrackIds.remove(id);
     }
     if (_selectedTrackIds.isEmpty) _selectionMode = false;
@@ -636,7 +546,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     try {
       final search = _searchQuery.trim();
-      final filterActive = hasAdvancedFilter || _tagFilter.active;
+      final filterActive = hasAdvancedFilter || tags.tagFilter.active;
 
       List<VirtualFolder> folders;
       List<TrackItem> tracks;
@@ -708,13 +618,13 @@ class AppState extends ChangeNotifier {
   /// `MediaType.audio`，多媒体库传 null（不限类型）。
   Future<Set<int>> _computeMatchingIds(MediaType? type) async {
     if (hasAdvancedFilter) {
-      return _tagDao.getIdsByExpression(type, _advancedFilter, _allTags);
+      return _tagDao.getIdsByExpression(type, tags.advancedFilter, tags.allTags);
     }
     return _tagDao.getIdsByTags(
       type,
-      andTagIds: _tagFilter.andTagIds,
-      orTagIds: _tagFilter.orTagIds,
-      notTagIds: _tagFilter.notTagIds,
+      andTagIds: tags.tagFilter.andTagIds,
+      orTagIds: tags.tagFilter.orTagIds,
+      notTagIds: tags.tagFilter.notTagIds,
     );
   }
 
@@ -728,7 +638,7 @@ class AppState extends ChangeNotifier {
             : await _mediaDao.pathsByIds(matchingIds, type: type);
 
     Map<int, List<Tag>> folderTags = {};
-    if (!hasAdvancedFilter && _tagFilter.active) {
+    if (!hasAdvancedFilter && tags.tagFilter.active) {
       folderTags =
           await _tagDao.getTagsForFolders(folders.map((f) => f.id!).toList());
     }
@@ -748,7 +658,7 @@ class AppState extends ChangeNotifier {
         result.add(f);
         continue;
       }
-      if (!hasAdvancedFilter && _tagFilter.active) {
+      if (!hasAdvancedFilter && tagFilter.active) {
         final tags = folderTags[f.id] ?? const <Tag>[];
         if (_folderTagsMatch(tags)) result.add(f);
       }
@@ -758,12 +668,12 @@ class AppState extends ChangeNotifier {
 
   bool _folderTagsMatch(List<Tag> tags) {
     final ids = tags.map((t) => t.id).whereType<int>().toSet();
-    if (_tagFilter.andTagIds.any((id) => !ids.contains(id))) return false;
-    if (_tagFilter.orTagIds.isNotEmpty &&
-        !_tagFilter.orTagIds.any((id) => ids.contains(id))) {
+    if (tagFilter.andTagIds.any((id) => !ids.contains(id))) return false;
+    if (tagFilter.orTagIds.isNotEmpty &&
+        !tagFilter.orTagIds.any((id) => ids.contains(id))) {
       return false;
     }
-    if (_tagFilter.notTagIds.any((id) => ids.contains(id))) return false;
+    if (tagFilter.notTagIds.any((id) => ids.contains(id))) return false;
     return true;
   }
 
@@ -1034,7 +944,7 @@ class AppState extends ChangeNotifier {
     if (orphan.isEmpty) return 0;
 
     final deleted = await _trackDao.deleteByPaths(orphan);
-    _trackTags.clear();
+    tags.clearCaches();
     if (deleted > 0) _mediaRevision++;
     logInfo('AppState',
         '删除文件夹后清理失联曲目 ${orphan.length} 条（实删 $deleted 行）');
@@ -1213,7 +1123,7 @@ class AppState extends ChangeNotifier {
     }
     if (victims.isEmpty) return 0;
     final deleted = await _mediaDao.deleteByPaths(victims);
-    _trackTags.clear();
+    tags.clearCaches();
     // 媒体行被删了就要推进代数：作品层的 ImageGrid 缓存着查过的列表，
     // 只靠 folderVersion 它不知道该重查，删掉的磁贴会留在界面上。
     if (deleted > 0) _mediaRevision++;
@@ -1942,206 +1852,86 @@ class AppState extends ChangeNotifier {
   /// 特典标签名（第 19.3 节）
   static const String bonusTagName = '特典';
 
-  // ═══════════════ 标签 ═══════════════
+  // ═══════════════ 标签（转发到 TagState）═══════════════
 
-  Future<void> loadTags() async {
-    _allTags = await _tagDao.getAll();
-    notifyListeners();
-  }
-
-  Future<List<Tag>> getTrackTags(int trackId) async {
-    final cached = _trackTags[trackId];
-    if (cached != null) return List<Tag>.unmodifiable(cached);
-    final tags = await _tagDao.getTagsForTrack(trackId);
-    _trackTags[trackId] = List<Tag>.of(tags);
-    return List<Tag>.unmodifiable(_trackTags[trackId]!);
-  }
-
-  Future<List<Tag>> getImageTags(int imageId) async {
-    final cached = _imageTags[imageId];
-    if (cached != null) return List<Tag>.unmodifiable(cached);
-    final tags = await _tagDao.getTagsForImage(imageId);
-    _imageTags[imageId] = List<Tag>.of(tags);
-    return List<Tag>.unmodifiable(_imageTags[imageId]!);
-  }
-
-  /// 图片与视频通用：读单个媒体已绑定的标签（视频卡片菜单用）。
-  Future<List<Tag>> getTagsForMedia(int mediaId) async {
-    final cached = _imageTags[mediaId];
-    if (cached != null) return List<Tag>.unmodifiable(cached);
-    final tags = await _tagDao.getTagsForTrack(mediaId);
-    _imageTags[mediaId] = List<Tag>.of(tags);
-    return List<Tag>.unmodifiable(_imageTags[mediaId]!);
-  }
-
-  /// 切换曲目标签。同一曲目的多次调用按顺序串行执行。
-  ///
-  /// 连点两次同一个标签时，第二次必须在第一次写库并更新缓存之后才读当前状态；
-  /// 否则两次都读到「未打标签」，双击「关标签」会变成打开。
-  Future<void> toggleTagOnTrack(int trackId, Tag tag) =>
-      _queueTagToggle(trackId, image: false, tag: tag);
-
-  /// 切换图片标签。串行语义与 [toggleTagOnTrack] 相同。
-  Future<void> toggleTagOnImage(int imageId, Tag tag) =>
-      _queueTagToggle(imageId, image: true, tag: tag);
-
-  Future<void> _queueTagToggle(int mediaId,
-      {required bool image, required Tag tag}) {
-    final previous = _tagToggleChains[mediaId] ?? Future<void>.value();
-    final chain =
-        previous.then((_) => _applyTagToggle(mediaId, tag, image: image));
-    // 链尾只保留不会失败的 future：前一次出错不能卡住后面的点击。
-    final tail = chain.catchError((Object _) {});
-    _tagToggleChains[mediaId] = tail;
-    unawaited(tail.whenComplete(() {
-      if (identical(_tagToggleChains[mediaId], tail)) {
-        _tagToggleChains.remove(mediaId);
-      }
-    }));
-    return chain;
-  }
-
-  /// media_tags 以 media.id 为键，曲目与图片共用；只有内存缓存分两份。
-  Future<void> _applyTagToggle(int mediaId, Tag tag,
-      {required bool image}) async {
-    final cache = image ? _imageTags : _trackTags;
-    // 改副本，缓存里的 List 不被就地修改；调用方拿到的也是不可变视图。
-    final current = List<Tag>.of(cache[mediaId] ??
-        (image
-            ? await _tagDao.getTagsForImage(mediaId)
-            : await _tagDao.getTagsForTrack(mediaId)));
-    final has = current.any((t) => t.id == tag.id);
-    if (has) {
-      if (image) {
-        await _tagDao.removeTagFromImage(mediaId, tag.id!);
-      } else {
-        await _tagDao.removeTagFromTrack(mediaId, tag.id!);
-      }
-      current.removeWhere((t) => t.id == tag.id);
-    } else {
-      if (image) {
-        await _tagDao.addTagToImage(mediaId, tag.id!);
-      } else {
-        await _tagDao.addTagToTrack(mediaId, tag.id!);
-      }
-      current.add(tag);
-    }
-    cache[mediaId] = current;
-    notifyListeners();
-  }
-
-  Future<void> addTagToFolder(int folderId, Tag tag) async {
-    await addTagsToFolder(folderId, [tag]);
-  }
-
-  /// 为文件夹批量添加标签；[recursive] 为真时递归同步到其所有子文件夹曲目。
-  Future<void> addTagsToFolder(int folderId, List<Tag> tags,
-      {bool recursive = false}) async {
-    for (final tag in tags) {
-      await _tagDao.addTagToFolder(folderId, tag.id!);
-    }
-    if (recursive) {
-      final trackIds = await _collectFolderTrackIds(folderId);
-      await _tagDao.addTagsToTracks(trackIds, tags.map((t) => t.id!));
-    }
-    _folderVersion++;
-    notifyListeners();
-  }
-
-  Future<void> removeTagsFromFolder(int folderId, List<Tag> tags,
-      {bool recursive = false}) async {
-    if (recursive) {
-      final trackIds = await _collectFolderTrackIds(folderId);
-      await _tagDao.removeTagsFromTracks(trackIds, tags.map((t) => t.id!));
-    }
-    for (final tag in tags) {
-      await _tagDao.removeTagFromFolder(folderId, tag.id!);
-    }
-    _folderVersion++;
-    notifyListeners();
-  }
-
-  /// 收集文件夹及其所有子文件夹下的曲目 id（按路径前缀）
-  Future<Set<int>> _collectFolderTrackIds(int folderId) async {
-    final paths = <String>[];
-    final queue = <int>[folderId];
-    while (queue.isNotEmpty) {
-      final fid = queue.removeAt(0);
-      for (final fp in await _folderDao.getPaths(fid)) {
-        paths.add(fp.path);
-      }
-      for (final c in await _folderDao.listChildren(fid)) {
-        if (c.id != null) queue.add(c.id!);
-      }
-    }
-    if (paths.isEmpty) return {};
-    final tracks = await _trackDao.queryByDirs(paths);
-    return tracks.map((t) => t.id).whereType<int>().toSet();
-  }
-
+  List<Tag> get allTags => tags.allTags;
+  Set<int> get activeTagIds => tags.activeTagIds;
+  Set<String> get collapsedNamespaces => tags.collapsedNamespaces;
+  bool isNamespaceCollapsed(String namespace) =>
+      tags.isNamespaceCollapsed(namespace);
+  void toggleNamespaceCollapsed(String namespace) =>
+      tags.toggleNamespaceCollapsed(namespace);
+  void setAllNamespacesCollapsed(bool collapsed) =>
+      tags.setAllNamespacesCollapsed(collapsed);
+  List<String> get knownNamespaces => tags.knownNamespaces;
+  Future<void> loadTags() => tags.load();
+  Future<List<Tag>> getTrackTags(int trackId) => tags.getTrackTags(trackId);
+  Future<List<Tag>> getImageTags(int imageId) => tags.getImageTags(imageId);
+  Future<List<Tag>> getTagsForMedia(int mediaId) =>
+      tags.getTagsForMedia(mediaId);
   Future<List<Tag>> getFolderTags(int folderId) =>
-      _tagDao.getTagsForFolder(folderId);
+      tags.getFolderTags(folderId);
+  Future<({int media, int folders})> tagUsageCounts(int tagId) =>
+      tags.tagUsageCounts(tagId);
+  Tag? findTagByName(String name, {String? namespace}) =>
+      tags.findTagByName(name, namespace: namespace);
 
   /// 规则标签由软件按扩展名或媒体类型自动补行，删掉下次启动还会回来。
-  static bool isRuleTag(Tag tag) => TagDao.ruleNamespaces.contains(tag.namespace);
+  static bool isRuleTag(Tag tag) =>
+      TagDao.ruleNamespaces.contains(tag.namespace);
 
-  /// 按名字找标签。给了命名空间就精确匹配，没给就跨命名空间找第一个。
-  Tag? findTagByName(String name, {String? namespace}) {
-    final target = name.trim().toLowerCase();
-    if (target.isEmpty) return null;
-    for (final t in _allTags) {
-      if (t.name.toLowerCase() != target) continue;
-      if (namespace == null || t.namespace == namespace) return t;
-    }
-    return null;
-  }
-
-  /// 标签被多少条媒体、多少个文件夹引用（删除前提示用）。
-  Future<({int media, int folders})> tagUsageCounts(int tagId) =>
-      _tagDao.countUsage(tagId);
-
-  /// 标签库里出现过的命名空间（新建标签时给输入框做联想）。
-  List<String> get knownNamespaces {
-    final names = _allTags.map((t) => t.namespace).toSet().toList()..sort();
-    return names;
-  }
-
+  Future<void> toggleTagOnTrack(int trackId, Tag tag) =>
+      tags.toggleTagOnTrack(trackId, tag);
+  Future<void> toggleTagOnImage(int imageId, Tag tag) =>
+      tags.toggleTagOnImage(imageId, tag);
+  Future<void> addTagToFolder(int folderId, Tag tag) =>
+      tags.addTagToFolder(folderId, tag);
+  Future<void> addTagsToFolder(int folderId, List<Tag> list,
+          {bool recursive = false}) =>
+      tags.addTagsToFolder(folderId, list, recursive: recursive);
+  Future<void> removeTagsFromFolder(int folderId, List<Tag> list,
+          {bool recursive = false}) =>
+      tags.removeTagsFromFolder(folderId, list, recursive: recursive);
+  Future<Set<int>> collectFolderTrackIds(int folderId) =>
+      tags.collectFolderTrackIds(folderId);
+  Future<void> addTagsToTracks(Iterable<int> trackIds, List<Tag> list) =>
+      tags.addTagsToTracks(trackIds, list);
+  Future<void> removeTagsFromTracks(Iterable<int> trackIds, List<Tag> list) =>
+      tags.removeTagsFromTracks(trackIds, list);
+  Future<Set<int>> getTagIdsOnTracks(Iterable<int> trackIds) =>
+      tags.getTagIdsOnTracks(trackIds);
   Future<Tag> createTag(String name,
-      {String namespace = '', String color = '#cba6f7'}) async {
-    final ns = namespace.isEmpty ? 'general' : namespace;
-    final match = _allTags.where((t) =>
-        t.name.toLowerCase() == name.toLowerCase() && t.namespace == ns);
-    if (match.isNotEmpty) return match.first;
-    final tag = await _tagDao.insert(Tag(name: name, namespace: ns, color: color));
-    await loadTags();
-    return tag;
-  }
-
-  Future<void> deleteTag(int tagId) async {
-    await _tagDao.delete(tagId);
-    _trackTags.clear();
-    _imageTags.clear();
-    _removeFromFilter(tagId);
-    await loadTags();
-    await refresh();
-  }
-
-  /// 更新标签（重命名 / 改命名空间 / 改色）
+          {String namespace = '', String color = '#cba6f7'}) =>
+      tags.createTag(name, namespace: namespace, color: color);
+  Future<void> deleteTag(int tagId) => tags.deleteTag(tagId);
   Future<void> updateTag(int tagId, String name,
-      {String? namespace, String? color}) async {
-    final existing = await _tagDao.getById(tagId);
-    if (existing == null) return;
-    await _tagDao.update(Tag(
-      id: tagId,
-      namespace: namespace ?? existing.namespace,
-      name: name,
-      color: color ?? existing.color,
-    ));
-    _trackTags.clear();
-    _imageTags.clear();
-    await loadTags();
-    await refresh();
-  }
+          {String? namespace, String? color}) =>
+      tags.updateTag(tagId, name, namespace: namespace, color: color);
+
+  // 图片与视频的批量标签：媒体行统一写 `media_tags`，接口名保留旧写法。
+  Future<void> addTagsToImages(Iterable<int> mediaIds, List<Tag> list) =>
+      tags.addTagsToImages(mediaIds, list);
+  Future<void> removeTagsFromImages(Iterable<int> mediaIds, List<Tag> list) =>
+      tags.removeTagsFromImages(mediaIds, list);
+  Future<Set<int>> getTagIdsOnImages(Iterable<int> mediaIds) =>
+      tags.getTagIdsOnImages(mediaIds);
+  Future<void> addTagsToMedia(Iterable<int> mediaIds, List<Tag> list) =>
+      tags.addTagsToImages(mediaIds, list);
+  Future<void> removeTagsFromMedia(Iterable<int> mediaIds, List<Tag> list) =>
+      tags.removeTagsFromImages(mediaIds, list);
+  Future<Set<int>> getTagIdsOnMedia(Iterable<int> mediaIds) =>
+      tags.getTagIdsOnImages(mediaIds);
+  Future<void> setMediaTags(int mediaId, List<Tag> list) =>
+      tags.setMediaTags(mediaId, list);
+
+  // 标签筛选
+  void toggleAndFilter(int tagId) => tags.toggleAndFilter(tagId);
+  void toggleOrFilter(int tagId) => tags.toggleOrFilter(tagId);
+  void toggleNotFilter(int tagId) => tags.toggleNotFilter(tagId);
+  void clearTagFilters() => tags.clearTagFilters();
+  Future<void> setAdvancedFilter(String expression) =>
+      tags.setAdvancedFilter(expression);
+  Future<void> clearAdvancedFilter() => tags.clearAdvancedFilter();
 
   // ═══════════════ 曲目多选 + 批量标签 ═══════════════
 
@@ -2203,172 +1993,6 @@ class AppState extends ChangeNotifier {
       ..addAll(_tracks.map((t) => t.id).whereType<int>());
     _anchorTrackId = _tracks.isEmpty ? null : _tracks.first.id;
     notifyListeners();
-  }
-
-  Future<void> addTagsToTracks(Iterable<int> trackIds, List<Tag> tags) async {
-    await _tagDao.addTagsToTracks(trackIds, tags.map((t) => t.id!));
-    _trackTags.clear();
-    notifyListeners();
-  }
-
-  Future<void> removeTagsFromTracks(
-      Iterable<int> trackIds, List<Tag> tags) async {
-    await _tagDao.removeTagsFromTracks(trackIds, tags.map((t) => t.id!));
-    _trackTags.clear();
-    notifyListeners();
-  }
-
-  /// 返回这批曲目上已绑定的标签 id 集合（用于「移除标签」时过滤可选项）
-  Future<Set<int>> getTagIdsOnTracks(Iterable<int> trackIds) async {
-    final ids = trackIds.toList();
-    if (ids.isEmpty) return {};
-    final map = await _tagDao.getTagsForTracks(ids);
-    final result = <int>{};
-    for (final tags in map.values) {
-      for (final t in tags) {
-        if (t.id != null) result.add(t.id!);
-      }
-    }
-    return result;
-  }
-
-  // ── 图片批量标签 ──
-
-  Future<void> addTagsToImages(Iterable<int> imageIds, List<Tag> tags) async {
-    for (final t in tags) {
-      await _tagDao.addTagsToTracks(imageIds, [t.id!]);
-    }
-    _imageTags.clear();
-    notifyListeners();
-  }
-
-  Future<void> removeTagsFromImages(
-      Iterable<int> imageIds, List<Tag> tags) async {
-    for (final t in tags) {
-      await _tagDao.removeTagsFromTracks(imageIds, [t.id!]);
-    }
-    _imageTags.clear();
-    notifyListeners();
-  }
-
-  /// 返回这批图片上已绑定的标签 id 集合（用于「移除标签」时过滤可选项）
-  Future<Set<int>> getTagIdsOnImages(Iterable<int> imageIds) async {
-    final ids = imageIds.toList();
-    if (ids.isEmpty) return {};
-    final map = await _tagDao.getTagsForImages(ids);
-    final result = <int>{};
-    for (final tags in map.values) {
-      for (final t in tags) {
-        if (t.id != null) result.add(t.id!);
-      }
-    }
-    return result;
-  }
-
-  /// 覆盖设置单个媒体的标签集（视频卡片菜单用）。
-  ///
-  /// 媒体行不分类型，图片与视频都存 `media_tags`，所以这里复用曲目的写入口。
-  Future<void> setMediaTags(int mediaId, List<Tag> tags) async {
-    await _tagDao.setTrackTags(mediaId, [
-      for (final t in tags)
-        if (t.id != null) t.id!,
-    ]);
-    _imageTags.clear();
-    if (_tagFilter.active || hasAdvancedFilter) {
-      await refresh();
-    } else {
-      notifyListeners();
-    }
-  }
-
-  /// 图片与视频通用的批量标签入口，媒体行统一存 `media_tags`。
-  Future<void> addTagsToMedia(Iterable<int> mediaIds, List<Tag> tags) =>
-      addTagsToImages(mediaIds, tags);
-
-  Future<void> removeTagsFromMedia(Iterable<int> mediaIds, List<Tag> tags) =>
-      removeTagsFromImages(mediaIds, tags);
-
-  Future<Set<int>> getTagIdsOnMedia(Iterable<int> mediaIds) =>
-      getTagIdsOnImages(mediaIds);
-
-  /// 当前标签筛选（AND ∪ OR ∪ NOT）里出现的全部标签 id。
-  Set<int> get activeTagIds => {
-        ..._tagFilter.andTagIds,
-        ..._tagFilter.orTagIds,
-        ..._tagFilter.notTagIds,
-      };
-
-  void _removeFromFilter(int tagId) {
-    _tagFilter = TagFilter(
-      andTagIds: _tagFilter.andTagIds.where((id) => id != tagId).toList(),
-      orTagIds: _tagFilter.orTagIds.where((id) => id != tagId).toList(),
-      notTagIds: _tagFilter.notTagIds.where((id) => id != tagId).toList(),
-    );
-    _persistNotTagIds();
-  }
-
-  // 标签筛选
-  void toggleAndFilter(int tagId) {
-    _advancedFilter = '';
-    final list = List<int>.from(_tagFilter.andTagIds);
-    list.contains(tagId) ? list.remove(tagId) : list.add(tagId);
-    _tagFilter = TagFilter(
-      andTagIds: list,
-      orTagIds: _tagFilter.orTagIds.where((id) => id != tagId).toList(),
-      notTagIds: _tagFilter.notTagIds.where((id) => id != tagId).toList(),
-    );
-    refresh();
-  }
-
-  void toggleOrFilter(int tagId) {
-    _advancedFilter = '';
-    final list = List<int>.from(_tagFilter.orTagIds);
-    list.contains(tagId) ? list.remove(tagId) : list.add(tagId);
-    _tagFilter = TagFilter(
-      andTagIds: _tagFilter.andTagIds.where((id) => id != tagId).toList(),
-      orTagIds: list,
-      notTagIds: _tagFilter.notTagIds.where((id) => id != tagId).toList(),
-    );
-    _persistNotTagIds();
-    refresh();
-  }
-
-  void toggleNotFilter(int tagId) {
-    _advancedFilter = '';
-    final list = List<int>.from(_tagFilter.notTagIds);
-    list.contains(tagId) ? list.remove(tagId) : list.add(tagId);
-    _tagFilter = TagFilter(
-      andTagIds: _tagFilter.andTagIds.where((id) => id != tagId).toList(),
-      orTagIds: _tagFilter.orTagIds.where((id) => id != tagId).toList(),
-      notTagIds: list,
-    );
-    _persistNotTagIds();
-    refresh();
-  }
-
-  void clearTagFilters() {
-    _tagFilter = const TagFilter();
-    _persistNotTagIds();
-    refresh();
-  }
-
-  Future<void> setAdvancedFilter(String expression) async {
-    final expr = expression.trim();
-    if (expr.isEmpty) {
-      await clearAdvancedFilter();
-      return;
-    }
-    FilterExpressionParser.parse(expr);
-    _advancedFilter = expr;
-    _tagFilter = const TagFilter();
-    await SettingsService.instance.addExpression(expr);
-    await refresh();
-  }
-
-  Future<void> clearAdvancedFilter() async {
-    if (!hasAdvancedFilter) return;
-    _advancedFilter = '';
-    await refresh();
   }
 
   // ═══════════════ 播放 ═══════════════
