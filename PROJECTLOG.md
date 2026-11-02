@@ -247,3 +247,26 @@
 | 行数 | `lib/state/app_state.dart` 降到 2802 行 |
 
 验证：`flutter analyze --no-fatal-infos` 无问题，`flutter test` 527 例全过。
+
+## 2026-11-02 封面回退链：读尺寸与找封面两个新模块
+
+### 动作
+
+| 文件 | 内容 |
+|---|---|
+| `lib/services/image_size.dart` | 只读文件头拿宽高：PNG、GIF、BMP、WebP（VP8X、VP8L、VP8）、JPEG 逐段扫到 SOF。最多读前 64 KB |
+| `lib/services/cover_finder.dart` | 四级回退：根目录白名单、信号目录、根目录任意图、整棵子树；`fetchAndWrite` 把选中的图写到作品根目录 |
+| `test/services/image_size_test.dart` | 4 例：PNG、BMP 负高度、JPEG 扫段、脏数据不抛异常 |
+| `test/services/cover_finder_test.dart` | 9 例：四级回退、编号名优先、写盘不覆盖、尺寸探测失败也能挑 |
+
+### 两个口径修正
+
+1. **深浅度要按作品根算。** `scoreCoverPath` 原来用整条路径的目录数做深度，`/tmp/x/a/one.jpg` 这种绝对路径一进来就扣成负分。改成新参数 `rootPath`，按「离作品根几层」扣分，`pickBestCover` 同步。
+2. **分值只排序，不淘汰。** 第四级回退的定义就是「一张都不像封面时也得挑一张」，所以 `pickBestCover` 不再丢掉非正分候选；淘汰留在调用方，白名单门槛与信号目录自己判。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze --no-fatal-infos` | 无问题 |
+| `flutter test` | 541 例全过 |

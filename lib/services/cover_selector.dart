@@ -115,7 +115,10 @@ int scoreCoverName(String fileName, {String? code}) {
 }
 
 /// 整条路径的分值：文件名 + 目录信号 + 深浅度。尺寸分另算，见 [scoreSize]。
-int scoreCoverPath(String path, {String? code}) {
+///
+/// [rootPath] 是作品根目录。给了它，深浅度按「离作品根几层」算；不给就只能按
+/// 整条路径的目录数算，跨目录比较时会不公平。
+int scoreCoverPath(String path, {String? code, String? rootPath}) {
   final candidate = CoverCandidate(path);
   if (!candidate.isImage) return 0;
 
@@ -131,7 +134,7 @@ int scoreCoverPath(String path, {String? code}) {
   if (dirs.any((d) => _bonusDirNames.contains(d.toLowerCase()))) score += 10;
 
   // 越靠近作品根目录越可能是封面，每深一层扣 5 分。
-  score -= (dirs.length - 1).clamp(0, 6) * 5;
+  score -= _relativeDepth(path, rootPath).clamp(0, 6) * 5;
   return score;
 }
 
@@ -156,9 +159,10 @@ CoverCandidate? pickBestCover(
   String? code,
   ({int width, int height})? Function(String path)? sizeOf,
   bool Function(String path)? exists,
+  String? rootPath,
 }) {
   CoverCandidate? best;
-  var bestScore = 0;
+  var bestScore = -1 << 30;
   String? bestName;
 
   for (final path in paths) {
@@ -166,24 +170,21 @@ CoverCandidate? pickBestCover(
     final candidate = CoverCandidate(path);
     if (!candidate.isImage) continue;
 
-    var score = scoreCoverPath(path, code: code);
-    if (score <= 0) continue;
+    // 分值只用来排序，不用来淘汰：第四级回退就是「一张都不像封面时也得挑一张」，
+    // 淘汰放在调用方（白名单门槛、信号目录）判。
+    var score = scoreCoverPath(path, code: code, rootPath: rootPath);
     final size = sizeOf?.call(path);
-    if (size != null) {
-      final bonus = scoreSize(size.width, size.height);
-      if (score + bonus <= 0) continue;
-      score += bonus;
-    }
+    if (size != null) score += scoreSize(size.width, size.height);
 
     final name = candidate.fileName;
     final better = best == null ||
         score > bestScore ||
         (score == bestScore &&
-            candidate.directories.length <
-                CoverCandidate(best.path).directories.length) ||
+            _relativeDepth(candidate.path, rootPath) <
+                _relativeDepth(best.path, rootPath)) ||
         (score == bestScore &&
-            candidate.directories.length ==
-                CoverCandidate(best.path).directories.length &&
+            _relativeDepth(candidate.path, rootPath) ==
+                _relativeDepth(best.path, rootPath) &&
             _naturalLess(name, bestName ?? ''));
     if (better) {
       best = candidate;
@@ -193,6 +194,17 @@ CoverCandidate? pickBestCover(
   }
 
   return best;
+}
+
+/// 图片所在目录离 [rootPath] 有几层；没给根目录时退回整条路径的目录数。
+int _relativeDepth(String path, String? rootPath) {
+  final dir = p.dirname(path);
+  if (rootPath == null) {
+    return p.split(dir).where((s) => s.isNotEmpty && s != '/').length;
+  }
+  final rel = p.isWithin(rootPath, dir) ? p.relative(dir, from: rootPath) : dir;
+  if (rel == '.' || rel.isEmpty) return 0;
+  return p.split(rel).where((s) => s.isNotEmpty && s != '/').length;
 }
 
 /// 自然序比较：把连续数字当成整数比，比纯字典序更接近资源管理器的顺序。
