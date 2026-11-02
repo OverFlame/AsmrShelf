@@ -24,7 +24,6 @@ import '../services/dlsite/dlsite_repository.dart';
 import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
 import '../services/plan_importer.dart';
-import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
@@ -33,6 +32,7 @@ import 'dlsite_state.dart';
 import 'import_state.dart';
 import 'tag_filter.dart';
 import 'library_state.dart';
+import 'playback_state.dart';
 import 'settings_state.dart';
 import 'tag_state.dart';
 
@@ -74,7 +74,6 @@ class AppState extends ChangeNotifier {
   // ── 中间栏内容 ──
   List<VirtualFolder> get centerFolders => library.centerFolders;
   /// 播放位置落盘的节流（见 lib/services/play_position.dart）
-  final PlayPositionThrottle _positionThrottle = PlayPositionThrottle();
 
   List<TrackItem> get tracks => library.tracks;
 
@@ -168,10 +167,8 @@ class AppState extends ChangeNotifier {
   String? get importError => importState.error;
 
   // ── 最近播放 ──
-  List<TrackItem> _recentTracks = [];
-  List<TrackItem> get recentTracks => _recentTracks;
+  List<TrackItem> get recentTracks => playback.recentTracks;
   /// [loadRecentTracks] 的代际：快速切歌会并发触发多次重载，只有最后一次能写回。
-  int _recentLoadGeneration = 0;
 
   // ── 播放队列来源作品的封面（在 CoverState 里）──
   /// 当前播放队列来源作品的封面。队列建立时记录，与「当前浏览的作品」解耦。
@@ -181,8 +178,7 @@ class AppState extends ChangeNotifier {
   int get coverCacheLimitMB => covers.cacheLimitMB;
 
   // ── 当前曲目的收藏选段（BUILD_GUIDE 第 24.3 节）──
-  List<MediaSegment> _segments = [];
-  List<MediaSegment> get segments => List.unmodifiable(_segments);
+  List<MediaSegment> get segments => playback.segments;
 
   // ── 设置 ──
 
@@ -334,6 +330,21 @@ class AppState extends ChangeNotifier {
       downloader: dlsiteCoverDownloader,
       onRefresh: refresh,
     )..addListener(notifyListeners);
+    // 播放状态持有队列命令、播放历史、选段与续播位置；队列在 player 里，
+    // 它只决定「播哪些、从哪首开始、播完写回什么」。
+    playback = PlaybackState(
+      player: player,
+      trackDao: () => _trackDao,
+      mediaDao: () => _mediaDao,
+      segmentService: () => _segmentService,
+      currentTracks: () => library.tracks,
+      onTracksChanged: (tracks) {
+        library.tracks = tracks;
+        notifyListeners();
+      },
+      rememberQueueCover: covers.rememberQueueCover,
+      queueCoverPath: () => currentWork?.coverPath,
+    )..addListener(notifyListeners);
     // 作品库只通知界面重画；跨对象协作（封面、元数据、标签）留在 AppState。
     library = LibraryState(
       trackDao: () => _trackDao,
@@ -351,6 +362,9 @@ class AppState extends ChangeNotifier {
     )..addListener(notifyListeners);
   }
 
+  /// 播放状态：队列命令、播放历史、选段与续播位置。
+  late final PlaybackState playback;
+
   /// 作品库状态：作品集、导航、中间栏内容、搜索与曲目多选。
   late final LibraryState library;
 
@@ -366,10 +380,10 @@ class AppState extends ChangeNotifier {
     // 缩略图服务必须在这里初始化：界面一建卡片就会调 thumbPath()，
     // 漏掉这一步时缩略图一张都生成不出来（网格只剩占位图标）。
     await ThumbnailService.instance.init();
-    player.onTrackStarted = _onTrackStarted;
-    player.resumeFrom = _resumePositionOf;
-    player.onPositionChanged = _onPlayPosition;
-    player.onTrackCompleted = _onTrackCompleted;
+    player.onTrackStarted = playback.onTrackStarted;
+    player.resumeFrom = playback.resumeOf;
+    player.onPositionChanged = playback.onPosition;
+    player.onTrackCompleted = playback.onTrackCompleted;
     player.onRepeatModeChanged = _persistRepeatMode;
     player.onShuffleChanged = _persistShuffle;
     player.onSpeedChanged = _persistSpeed;
@@ -1841,16 +1855,10 @@ class AppState extends ChangeNotifier {
   // ═══════════════ 播放 ═══════════════
 
   /// 播放当前列表从 [startIndex] 开始
-  Future<void> playTracks(List<TrackItem> list, int startIndex) async {
-    _rememberQueueCover();
-    await player.playQueue(list, startIndex: startIndex);
-  }
+  Future<void> playTracks(List<TrackItem> list, int startIndex) =>
+      playback.playTracks(list, startIndex);
 
-  Future<void> playAllCurrent() async {
-    if (library.tracks.isEmpty) return;
-    _rememberQueueCover();
-    await player.playQueue(library.tracks, startIndex: 0);
-  }
+  Future<void> playAllCurrent() => playback.playAllCurrent();
 
   /// 播放某个文件夹（含子文件夹）下的全部曲目
   Future<void> playFolderAll(int folderId) async {
@@ -1868,7 +1876,7 @@ class AppState extends ChangeNotifier {
     if (paths.isEmpty) return;
     final tracks = await _trackDao.queryByDirs(paths);
     if (tracks.isEmpty) return;
-    await playTracks(tracks, 0);
+    await playback.playTracks(tracks, 0);
   }
 
   /// 播放某个目录下的音频（多媒体栏点音频磁贴走这里）。
@@ -1904,7 +1912,7 @@ class AppState extends ChangeNotifier {
   Future<void> playAudioInDir(String dirPath, {int? startMediaId}) async {
     final queue = await audioQueueInDir(dirPath);
     if (queue.isEmpty) return;
-    await playTracks(queue, queueStartIndex(queue, startMediaId));
+    await playback.playTracks(queue, queueStartIndex(queue, startMediaId));
   }
 
   /// 播放某个作品全部卷下的曲目
@@ -1913,7 +1921,7 @@ class AppState extends ChangeNotifier {
     if (paths.isEmpty) return;
     final tracks = await _trackDao.queryByDirs(paths);
     if (tracks.isEmpty) return;
-    await playTracks(tracks, 0);
+    await playback.playTracks(tracks, 0);
   }
 
   /// 用外部播放器播放这个卷（BUILD_GUIDE 第 24.2 节）
@@ -1979,84 +1987,29 @@ class AppState extends ChangeNotifier {
   // ═══════════════ 收藏选段（BUILD_GUIDE 第 24.3 节）═══════════════
 
   /// 载入当前曲目的选段。没有曲目时清空列表。
-  Future<void> reloadSegments() async {
-    final id = player.currentTrack?.id;
-    if (id == null) {
-      _assignSegments(const []);
-      return;
-    }
-    await _reloadSegments(id);
-  }
-
-  Future<void> _reloadSegments(int mediaId) async {
-    _assignSegments(await _segmentService.listByMedia(mediaId));
-  }
-
-  /// 列表真的变了才通知：切歌时顺带载入选段，不该多出无谓的重建。
-  void _assignSegments(List<MediaSegment> list) {
-    if (_sameSegments(_segments, list)) return;
-    _segments = list;
-    notifyListeners();
-  }
-
-  static bool _sameSegments(List<MediaSegment> a, List<MediaSegment> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
-  }
+  Future<void> reloadSegments() => playback.reloadSegments();
 
   /// 保存一段选区。起止按当前曲目时长收口。
   Future<MediaSegment?> addSegment({
     required int startMs,
     required int endMs,
     String? name,
-  }) async {
-    final id = player.currentTrack?.id;
-    if (id == null) return null;
-    final seg = await _segmentService.add(
-      mediaId: id,
-      startMs: startMs,
-      endMs: endMs,
-      durationMs: player.duration.inMilliseconds,
-      name: name,
-    );
-    await _reloadSegments(id);
-    return seg;
-  }
+  }) =>
+      playback.addSegment(startMs: startMs, endMs: endMs, name: name);
 
-  Future<void> renameSegment(MediaSegment seg, String? name) async {
-    final id = seg.id;
-    if (id == null) return;
-    await _segmentService.rename(id, name);
-    await reloadSegments();
-  }
+  Future<void> renameSegment(MediaSegment seg, String? name) =>
+      playback.renameSegment(seg, name);
 
   /// 删除一段。删掉的正是当前循环段时同时关掉选区循环。
-  Future<void> deleteSegment(MediaSegment seg) async {
-    final id = seg.id;
-    if (id == null) return;
-    final looping = player.loopSegment;
-    if (looping != null && looping.id == id) {
-      await player.setLoopSegment(null);
-    }
-    await _segmentService.remove(id);
-    await reloadSegments();
-  }
+  Future<void> deleteSegment(MediaSegment seg) => playback.deleteSegment(seg);
 
   /// 开启或关闭选段循环。[seg] 为 null 时关闭。
-  Future<void> loopSegment(MediaSegment? seg) => player.setLoopSegment(seg);
+  Future<void> loopSegment(MediaSegment? seg) => playback.loopSegment(seg);
 
   /// 跳到段首播放
-  Future<void> jumpToSegment(MediaSegment seg) =>
-      player.seek(Duration(milliseconds: seg.startMs));
+  Future<void> jumpToSegment(MediaSegment seg) => playback.jumpToSegment(seg);
 
-  Future<void> playTrackAt(int index) async {
-    if (index < 0 || index >= library.tracks.length) return;
-    _rememberQueueCover();
-    await player.playQueue(library.tracks, startIndex: index);
-  }
+  Future<void> playTrackAt(int index) => playback.playTrackAt(index);
 
   // ═══════════════ 字幕 / 封面 ═══════════════
 
@@ -2211,86 +2164,9 @@ class AppState extends ChangeNotifier {
 
   // ═══════════════ 最近播放 / 播放历史 ═══════════════
 
-  void _onTrackStarted(TrackItem track) {
-    final id = track.id;
-    if (id == null) return;
-    unawaited(_reloadSegments(id));
-    final gen = ++_recentLoadGeneration;
-    unawaited(_trackDao
-        .recordPlay(id, DateTime.now().millisecondsSinceEpoch)
-        .then((_) => _reloadRecentTracks(gen))
-        .catchError((Object e) {
-      logError('AppState', 'recordPlay 失败: $e');
-    }));
-  }
+  Future<void> loadRecentTracks() => playback.loadRecent();
 
-  /// 续播位置：太靠前、或快听完的位置都从头开始（见 PlayPositionRules）。
-  Duration _resumePositionOf(TrackItem track) =>
-      PlayPositionRules.resumeOf(track.playPositionMs, track.durationMs);
-
-  /// 播放中每 250 毫秒报一次位置，按前进量节流后才写库。
-  void _onPlayPosition(TrackItem track, Duration position) {
-    final id = track.id;
-    if (id == null) return;
-    if (!_positionThrottle.shouldSave(position)) return;
-    _savePlayPosition(id, position.inMilliseconds);
-  }
-
-  /// 一首播到结尾：位置清零，下次从头播。
-  void _onTrackCompleted(TrackItem track) {
-    final id = track.id;
-    if (id == null) return;
-    _positionThrottle.reset();
-    _savePlayPosition(id, 0);
-  }
-
-  void _savePlayPosition(int mediaId, int positionMs) {
-    unawaited(_mediaDao.setPlayPosition(mediaId, positionMs).then((_) {
-      // 磁贴右侧的「已播时间」跟着刷新
-      _applyPlayPosition(mediaId, positionMs);
-    }).catchError((Object e) {
-      logError('AppState', '播放位置落盘失败: $e');
-    }));
-  }
-
-  /// 把新位置同步进内存里的曲目列表（不重新查库）。
-  void _applyPlayPosition(int mediaId, int positionMs) {
-    var changed = false;
-    final next = <TrackItem>[];
-    for (final track in library.tracks) {
-      if (track.id == mediaId && track.playPositionMs != positionMs) {
-        changed = true;
-        next.add(track.copyWith(playPositionMs: positionMs));
-      } else {
-        next.add(track);
-      }
-    }
-    if (!changed) return;
-    library.tracks = next;
-    notifyListeners();
-  }
-
-  Future<void> loadRecentTracks() => _reloadRecentTracks(_recentLoadGeneration);
-
-  /// 只有最后一次触发的重载能写回结果。
-  ///
-  /// 快速切歌会并发触发多次 recordPlay 与多次重载，先发起的那次可能后完成。
-  Future<void> _reloadRecentTracks(int gen) async {
-    final list = await _trackDao.recentPlayedTracks();
-    if (gen != _recentLoadGeneration) {
-      logInfo('AppState', 'recent gen=$gen 已被取代，丢弃结果');
-      return;
-    }
-    _recentTracks = list;
-    notifyListeners();
-  }
-
-  Future<void> playRecentTracks(int startIndex) async {
-    if (_recentTracks.isEmpty) return;
-    // 最近播放跨作品，没有单一来源封面，回退到每首曲目自己的封面。
-    covers.rememberQueueCover(null);
-    await player.playQueue(_recentTracks, startIndex: startIndex);
-  }
+  Future<void> playRecentTracks(int startIndex) => playback.playRecent(startIndex);
 
   // ═══════════════ 封面缓存管理（转发到 CoverState）═══════════════
 
