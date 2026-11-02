@@ -3,11 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../db/folder_dao.dart';
+import '../db/work_dao.dart';
 import '../db/track_dao.dart';
 import '../state/app_state.dart';
 import '../state/player_controller.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import 'cover_image.dart';
 import 'dialogs.dart';
 import 'launch_result_snack.dart';
 import 'scan_access_snack.dart';
@@ -401,25 +403,180 @@ class FolderBrowser extends StatelessWidget {
   Widget _content(BuildContext context, AppState appState) {
     final folders = appState.centerFolders;
     final tracks = appState.tracks;
+    final work = appState.currentFolderId == null ? appState.currentWork : null;
 
     if (folders.isEmpty && tracks.isEmpty) {
-      return Center(
-        child: Text(
-          appState.currentFolderId == null ? '该作品暂无内容' : '该文件夹为空',
-          style: TextStyle(color: AppColors.mutedLightOf(context), fontSize: 13),
-        ),
+      return ListView(
+        padding: const EdgeInsets.only(bottom: 8),
+        children: [
+          if (work != null) _WorkHeader(work: work),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            child: Center(
+              child: Text(
+                appState.currentFolderId == null ? '该作品暂无内容' : '该文件夹为空',
+                style: TextStyle(
+                    color: AppColors.mutedLightOf(context), fontSize: 13),
+              ),
+            ),
+          ),
+        ],
       );
     }
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 8),
       children: [
+        if (work != null) _WorkHeader(work: work),
         for (final f in folders) _FolderTile(folder: f),
         if (folders.isNotEmpty && tracks.isNotEmpty)
           const Divider(height: 1),
         for (int i = 0; i < tracks.length; i++)
           _TrackTile(track: tracks[i], index: i),
       ],
+    );
+  }
+}
+
+/// 作品详情头：封面、社团、系列、RJ 号、发售日、评分与简介。
+///
+/// 元数据来自 `work_metadata`，没抓过 DLsite 的作品只有封面与名字，
+/// 其余行直接不显示，不占一行「未知」。
+class _WorkHeader extends StatelessWidget {
+  const _WorkHeader({required this.work});
+
+  final Work work;
+
+  @override
+  Widget build(BuildContext context) {
+    final work = this.work;
+    final appState = context.watch<AppState>();
+    // 元数据在 enterWork 时已经预取进内存，这里同步读，不用 FutureBuilder：
+    // 异步读会先闪一帧「没抓过」，滚动时还会反复查库。
+    final meta = appState.workMetadataSync(work.id!);
+    final full = appState.cachedDlsiteWorkSync(work.id!);
+        final subtitle = [
+          if (meta?.circle != null && meta!.circle!.isNotEmpty) meta.circle!,
+          if (meta?.series != null && meta!.series!.isNotEmpty)
+            '系列·${meta.series!}',
+        ].join(' · ');
+        final facts = <String>[
+          if (meta?.rjCode != null && meta!.rjCode!.isNotEmpty) meta.rjCode!,
+          if (full?.releaseDate != null && full!.releaseDate!.isNotEmpty)
+            '发售 ${full.releaseDate!}',
+          if (full?.stars != null) '评分 ${full!.stars!.toStringAsFixed(1)}',
+        ];
+        final description = meta?.description?.trim() ?? '';
+        return Container(
+          key: const ValueKey('work-header'),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          decoration: BoxDecoration(
+            color: AppColors.panelOf(context),
+            border: Border(
+                bottom: BorderSide(color: AppColors.mutedLighterOf(context))),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CoverImage(
+                path: work.coverPath,
+                width: 96,
+                height: 96,
+                borderRadius: 8,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      work.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimaryOf(context)),
+                    ),
+                    if (subtitle.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(subtitle,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textSecondaryOf(context))),
+                      ),
+                    if (facts.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(facts.join('  ·  '),
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.mutedLightOf(context))),
+                      ),
+                    if (description.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: InkWell(
+                          onTap: () => _showDescription(context, work.name,
+                              description),
+                          child: Text(
+                            description.replaceAll(RegExp(r'\s+'), ' '),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                height: 1.5,
+                                color: AppColors.textSecondaryOf(context)),
+                          ),
+                        ),
+                      )
+                    else if (meta == null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text('在工具条上点 DLsite 可以补全社团、简介与评分',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.mutedLightOf(context))),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (description.isNotEmpty)
+                    Text('点简介看全文',
+                        style: TextStyle(
+                            fontSize: 11, color: AppColors.mutedOf(context))),
+                ],
+              ),
+            ],
+          ),
+        );
+  }
+
+  void _showDescription(BuildContext context, String title, String text) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640, maxHeight: 480),
+          child: SingleChildScrollView(
+            child: SelectableText(text,
+                style: TextStyle(
+                    fontSize: 13,
+                    height: 1.6,
+                    color: AppColors.textSecondaryOf(ctx))),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+        ],
+      ),
     );
   }
 }

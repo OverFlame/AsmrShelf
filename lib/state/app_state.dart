@@ -19,6 +19,8 @@ import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
 import '../services/import_scanner.dart';
 import '../services/dlsite/dlsite_api.dart';
+import '../services/dlsite/dlsite_cover.dart';
+import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
 import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
@@ -28,6 +30,7 @@ import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
 import 'cover_state.dart';
+import 'dlsite_state.dart';
 import 'import_state.dart';
 import 'tag_filter.dart';
 import 'settings_state.dart';
@@ -54,6 +57,9 @@ class AppState extends ChangeNotifier {
 
   /// 抓 DLsite 元数据用的接口层。用例注入假传输层，避免真联网。
   final DlsiteApi? dlsiteApi;
+
+  /// 下载远程封面用。用例注入假字节，避免真联网。
+  final DlsiteCoverDownloader? dlsiteCoverDownloader;
 
   // ── 作品集 ──
   List<Work> _works = [];
@@ -327,6 +333,7 @@ class AppState extends ChangeNotifier {
     required this.player,
     VideoLauncher? videoLauncher,
     this.dlsiteApi,
+    this.dlsiteCoverDownloader,
   }) : _launcher = videoLauncher ?? VideoLauncher() {
     // 标签状态只通知界面重画；筛选变了要让列表重查，所以把 refresh 注进去。
     tags.addListener(notifyListeners);
@@ -337,10 +344,20 @@ class AppState extends ChangeNotifier {
       db: () => DatabaseManager.instance.db,
       protectedPaths: _protectedCoverPaths,
     )..addListener(notifyListeners);
+    dlsite = DlsiteState(
+      db: () => DatabaseManager.instance.db,
+      workDao: () => _workDao,
+      api: dlsiteApi,
+      downloader: dlsiteCoverDownloader,
+      onRefresh: refresh,
+    )..addListener(notifyListeners);
   }
 
   /// 封面相关状态：卷封面、播放来源封面、缓存上限与驱逐。
   late final CoverState covers;
+
+  /// DLsite 元数据状态：编号解析、抓取、预览与应用。
+  late final DlsiteState dlsite;
 
 
   Future<void> init() async {
@@ -784,6 +801,8 @@ class AppState extends ChangeNotifier {
     ];
     // 自动封面指向的原图可能被删了，进来时顺手改选当前第一张。
     await _autoAssignWorkCover(workId);
+    // 元数据先装进内存，详情头同步读，省一次闪烁。
+    await dlsite.prefetch(workId);
     _currentWork = await _workDao.getById(workId) ?? work;
     await refresh();
   }
@@ -1480,31 +1499,43 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  /// 给一部作品抓 DLsite 元数据。
+  /// 给一部作品抓 DLsite 元数据并直接落库。
   ///
   /// 编号优先按作品目录名解析，目录名没有再看库里登记过的编号。抓不到时返回
   /// 带说明的结果，不抛异常，界面直接拿去弹提示。
   Future<DlsiteFetchResult> fetchDlsiteMetadata(
     int workId, {
     bool applyCover = false,
-  }) async {
-    final work = await _workDao.getById(workId);
-    final folderName = work?.rootPath == null
-        ? null
-        : p.basename(work!.rootPath!).trim();
-    final code = (folderName == null ? null : parseWorkCode(folderName)?.code) ??
-        (await WorkMetadataDao(DatabaseManager.instance.db).getByWork(workId))
-            ?.rjCode;
-    if (code == null) {
-      return const DlsiteFetchResult(message: '这部作品的目录名里没有 RJ 号，先改名或手动填编号');
-    }
-    final result = await DlsiteRepository(
-      DatabaseManager.instance.db,
-      api: dlsiteApi,
-    ).fetchForWork(workId, code, applyCover: applyCover);
-    if (result.ok) notifyListeners();
-    return result;
-  }
+  }) =>
+      dlsite.fetch(workId, applyCover: applyCover);
+
+  /// 只抓取不落标签，给预览对话框看。
+  Future<DlsiteFetchResult> previewDlsiteMetadata(int workId) =>
+      dlsite.preview(workId);
+
+  /// 用户在预览里确认后应用元数据，[applyCover] 时把封面也换成远程图。
+  Future<DlsiteFetchResult> applyDlsiteMetadata(
+    int workId,
+    DlsiteWork work, {
+    bool applyCover = false,
+  }) =>
+      dlsite.apply(workId, work, applyCover: applyCover);
+
+  /// 下载远程封面并设为作品封面，返回本地路径；失败抛 [DlsiteImageException]。
+  Future<String> downloadDlsiteCover(int workId, String url) =>
+      dlsite.downloadCover(workId, url);
+
+  /// 作品的 DLsite 元数据（简介、社团、系列、发售日），界面详情用。
+  Future<WorkMetadata?> workMetadata(int workId) => dlsite.metadataOf(workId);
+
+  /// 同步读已预取的元数据（详情头用）。
+  WorkMetadata? workMetadataSync(int workId) => dlsite.metadataSync(workId);
+
+  /// 同步读已反解的 DLsite 信息（发售日、评分）。
+  DlsiteWork? cachedDlsiteWorkSync(int workId) => dlsite.workSync(workId);
+
+  /// 缓存里的完整 DLsite 作品信息（发售日、评分），不联网。
+  Future<DlsiteWork?> cachedDlsiteWork(int workId) => dlsite.cachedWork(workId);
 
   /// 从一个根目录一次性导入多部作品（每部作品一个子目录）。
   ///

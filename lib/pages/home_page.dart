@@ -6,11 +6,13 @@ import 'package:provider/provider.dart';
 import '../services/import_scanner.dart';
 import '../services/settings_service.dart';
 import '../services/thumbnail_cache.dart';
+import '../services/dlsite/dlsite_cover.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/dialogs.dart' show confirmDialog, pickDirectory;
 import '../widgets/filter_dialog.dart';
+import '../widgets/dlsite_preview_dialog.dart';
 import '../widgets/folder_browser.dart';
 import '../widgets/player_bar.dart';
 import '../widgets/split_handle.dart';
@@ -655,15 +657,36 @@ class _VisualToolbar extends StatelessWidget {
       content: Text('正在抓取 DLsite 元数据…'),
       duration: Duration(minutes: 1),
     ));
-    final result = await appState.fetchDlsiteMetadata(workId);
-    if (!context.mounted) return;
+    final result = await appState.previewDlsiteMetadata(workId);
     messenger.hideCurrentSnackBar();
-    final text = result.ok
-        ? '已抓到 ${result.work!.workNo}：${result.work!.title}'
-            '${result.fromCache ? '（本地缓存）' : ''}'
-            '${result.grantedTags > 0 ? '，新增 ${result.grantedTags} 个标签' : ''}'
-        : result.message;
-    messenger.showSnackBar(SnackBar(content: Text(text)));
+    if (!context.mounted) return;
+    final work = result.work;
+    if (work == null) {
+      messenger.showSnackBar(SnackBar(content: Text(result.message)));
+      return;
+    }
+    final choice = await showDlsitePreviewDialog(context,
+        work: work, fromCache: result.fromCache);
+    if (choice == null || !context.mounted) return;
+    final applied = await appState.applyDlsiteMetadata(
+      workId,
+      work,
+      applyCover: choice.applyCover,
+    );
+    var coverNote = '';
+    if (choice.applyCover && work.cover != null) {
+      try {
+        await appState.downloadDlsiteCover(workId, work.cover!.url);
+      } on DlsiteImageException catch (e) {
+        coverNote = '；封面没换：${e.message}';
+      }
+    }
+    if (!context.mounted) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text('已应用 ${work.workNo} 的元数据'
+          '${applied.grantedTags > 0 ? '，新增 ${applied.grantedTags} 个标签' : ''}'
+          '$coverNote'),
+    ));
   }
 
   Future<void> _addFolderToWork(BuildContext context) async {

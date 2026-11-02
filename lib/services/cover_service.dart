@@ -55,6 +55,68 @@ class CoverService {
     }
   }
 
+  /// 把远程抓来的作品封面写进缓存目录，返回路径。
+  ///
+  /// 与 [importCover] 的区别是字节已经在内存里（DLsite 的图），不落临时文件。
+  /// 写了新扩展名就删掉旧扩展名的同 id 文件，否则换格式后会留下两份，
+  /// 界面按 `works.cover_path` 读新的，旧的只会白占空间。
+  static Future<String?> writeWorkCover(int workId, Uint8List bytes,
+      {String? extHint}) async {
+    try {
+      final ext = _sanitizeExt(extHint ?? _sniffExt(bytes));
+      final dir = await _coversDir();
+      final dest = File(p.join(dir, 'work_$workId.$ext'));
+      await writeFileAtomic(dest, (tmp) => tmp.writeAsBytes(bytes, flush: true));
+      await for (final e in Directory(dir).list()) {
+        final name = p.basename(e.path);
+        if (e is File &&
+            name.startsWith('work_$workId.') &&
+            name != 'work_$workId.$ext') {
+          try {
+            await e.delete();
+          } catch (_) {}
+        }
+      }
+      final size = bytes.length;
+      logInfo('Cover', '写入作品封面: work_$workId.$ext ($size 字节)');
+      return dest.path;
+    } catch (e) {
+      logWarn('Cover', '写入作品封面失败: $e');
+      return null;
+    }
+  }
+
+  /// 只认这五种扩展名，别的一律当 jpg，避免抓来一个 `.php` 当图片写。
+  static String _sanitizeExt(String ext) {
+    final e = ext.toLowerCase();
+    return const {'jpg', 'jpeg', 'png', 'webp', 'bmp'}.contains(e) ? e : 'jpg';
+  }
+
+  /// 按文件头判断扩展名。抓来的图不一定带可信的 Content-Type。
+  static String _sniffExt(Uint8List b) {
+    if (b.length >= 8 &&
+        b[0] == 0x89 &&
+        b[1] == 0x50 &&
+        b[2] == 0x4E &&
+        b[3] == 0x47) {
+      return 'png';
+    }
+    if (b.length >= 3 && b[0] == 0xFF && b[1] == 0xD8) return 'jpg';
+    if (b.length >= 12 &&
+        b[0] == 0x52 &&
+        b[1] == 0x49 &&
+        b[2] == 0x46 &&
+        b[3] == 0x46 &&
+        b[8] == 0x57 &&
+        b[9] == 0x45 &&
+        b[10] == 0x42 &&
+        b[11] == 0x50) {
+      return 'webp';
+    }
+    if (b.length >= 2 && b[0] == 0x42 && b[1] == 0x4D) return 'bmp';
+    return 'jpg';
+  }
+
   /// 封面缓存目录（公开）
   static Future<String> coversDir() => _coversDir();
 
