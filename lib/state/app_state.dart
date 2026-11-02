@@ -27,6 +27,7 @@ import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
+import 'cover_state.dart';
 import 'import_state.dart';
 import 'tag_filter.dart';
 import 'settings_state.dart';
@@ -126,7 +127,7 @@ class AppState extends ChangeNotifier {
   double get libraryHeight => settings.libraryHeight;
 
   /// 缩略图缓存上限（MB）。复用封面缓存设置键，见 [setCacheSizeMB]。
-  int get cacheSizeMB => _coverCacheLimitMB;
+  int get cacheSizeMB => covers.cacheLimitMB;
 
   String get viewMode => settings.viewMode;
 
@@ -183,14 +184,12 @@ class AppState extends ChangeNotifier {
   /// [loadRecentTracks] 的代际：快速切歌会并发触发多次重载，只有最后一次能写回。
   int _recentLoadGeneration = 0;
 
-  // ── 播放队列来源作品的封面 ──
-  String? _playingWorkCover;
+  // ── 播放队列来源作品的封面（在 CoverState 里）──
   /// 当前播放队列来源作品的封面。队列建立时记录，与「当前浏览的作品」解耦。
-  String? get playingWorkCover => _playingWorkCover;
+  String? get playingWorkCover => covers.playingWorkCover;
 
   // ── 封面缓存上限（MB，0 表示不限制）──
-  int _coverCacheLimitMB = 512;
-  int get coverCacheLimitMB => _coverCacheLimitMB;
+  int get coverCacheLimitMB => covers.cacheLimitMB;
 
   // ── 当前曲目的收藏选段（BUILD_GUIDE 第 24.3 节）──
   List<MediaSegment> _segments = [];
@@ -332,7 +331,16 @@ class AppState extends ChangeNotifier {
     // 标签状态只通知界面重画；筛选变了要让列表重查，所以把 refresh 注进去。
     tags.addListener(notifyListeners);
     tags.onRefresh = refresh;
+    // 封面缓存驱逐要知道「正在播的曲目」和「当前作品的封面」，用回调注入，
+    // 不让 CoverState 反向依赖播放器与作品库。
+    covers = CoverState(
+      db: () => DatabaseManager.instance.db,
+      protectedPaths: _protectedCoverPaths,
+    )..addListener(notifyListeners);
   }
+
+  /// 封面相关状态：卷封面、播放来源封面、缓存上限与驱逐。
+  late final CoverState covers;
 
 
   Future<void> init() async {
@@ -1603,46 +1611,27 @@ class AppState extends ChangeNotifier {
     return base.isEmpty ? path : base;
   }
 
-  // ═══════════════ 卷封面与卷内图片（BUILD_GUIDE 第 19、21 节）═══════════════
-
-  VolumeCoverService get _coverService =>
-      VolumeCoverService(DatabaseManager.instance.db);
+  // ═══════════════ 卷封面（转发到 CoverState）═══════════════
 
   /// 卷封面或裁剪改动后自增，界面据此重新读取封面。
-  int _coverVersion = 0;
-  int get coverVersion => _coverVersion;
+  int get coverVersion => covers.coverVersion;
 
-  /// 自动候选按第 19.2 节的四级顺序返回，第一个就是自动选中的那张。
   Future<List<VolumeCoverCandidate>> volumeCoverCandidates(int folderId) =>
-      _coverService.listCandidates(folderId);
+      covers.volumeCoverCandidates(folderId);
 
-  /// 当前生效的封面：手动指定的优先，其次是自动候选。
-  Future<String?> volumeCover(int folderId) =>
-      _coverService.effectiveCover(folderId);
+  Future<String?> volumeCover(int folderId) => covers.volumeCover(folderId);
 
-  /// 手动指定封面。传 null 表示恢复自动候选。
-  Future<void> setVolumeCover(int folderId, String? path) async {
-    await _coverService.setCover(folderId, path);
-    _coverVersion++;
-    notifyListeners();
-  }
+  Future<void> setVolumeCover(int folderId, String? path) =>
+      covers.setVolumeCover(folderId, path);
 
-  Future<Rect?> volumeCoverCrop(int folderId) => _coverService.cropOf(folderId);
+  Future<Rect?> volumeCoverCrop(int folderId) => covers.volumeCoverCrop(folderId);
 
-  /// 存裁剪框。传 null 表示恢复默认（清空 `cover_crop`）。
-  Future<void> setVolumeCoverCrop(int folderId, Rect? crop) async {
-    await _coverService.setCrop(folderId, crop);
-    _coverVersion++;
-    notifyListeners();
-  }
+  Future<void> setVolumeCoverCrop(int folderId, Rect? crop) =>
+      covers.setVolumeCoverCrop(folderId, crop);
 
-  /// 指定封面与裁剪一次写完，避免界面连点两次。
   Future<void> setVolumeCoverWithCrop(
-      int folderId, String? path, Rect? crop) async {
-    await _coverService.setCoverWithCrop(folderId, path, crop);
-    _coverVersion++;
-    notifyListeners();
-  }
+          int folderId, String? path, Rect? crop) =>
+      covers.setVolumeCoverWithCrop(folderId, path, crop);
 
   // ═══════════════ 字幕归属（BUILD_GUIDE 第 18.5、23.6 节）═══════════════
 
@@ -2278,20 +2267,12 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
-  /// 当前曲目封面：优先队列来源作品的封面，否则曲目内嵌封面。
-  ///
-  /// 用播放队列建立时记下的作品封面，而不是「当前浏览的作品」，
-  /// 播放中切换浏览对象不会把播放栏与通知栏的封面换掉。
-  String? coverForTrack(TrackItem track) {
-    final wc = _playingWorkCover;
-    if (wc != null && wc.isNotEmpty) return wc;
-    final own = track.coverPath;
-    return own != null && own.isNotEmpty ? own : null;
-  }
+  /// 当前曲目封面：优先队列来源作品的封面，否则曲目自己的封面。
+  String? coverForTrack(TrackItem track) => covers.coverForTrack(track);
 
   /// 记下这次播放队列对应的作品封面。
   void _rememberQueueCover() {
-    _playingWorkCover = _currentWork?.coverPath;
+    covers.rememberQueueCover(_currentWork?.coverPath);
   }
 
   /// 按当前浏览的作品记录播放队列来源封面。
@@ -2453,40 +2434,21 @@ class AppState extends ChangeNotifier {
   Future<void> playRecentTracks(int startIndex) async {
     if (_recentTracks.isEmpty) return;
     // 最近播放跨作品，没有单一来源封面，回退到每首曲目自己的封面。
-    _playingWorkCover = null;
+    covers.rememberQueueCover(null);
     await player.playQueue(_recentTracks, startIndex: startIndex);
   }
 
-  // ═══════════════ 封面缓存管理 ═══════════════
+  // ═══════════════ 封面缓存管理（转发到 CoverState）═══════════════
 
-  Future<void> loadCoverCacheLimit() async {
-    _coverCacheLimitMB = SettingsService.instance.coverCacheLimitMB;
-  }
+  Future<void> loadCoverCacheLimit() => covers.loadCacheLimit();
 
-  Future<int> getCoverCacheSizeBytes() =>
-      CoverService.embeddedCacheSizeBytes();
+  Future<int> getCoverCacheSizeBytes() => covers.getCacheSizeBytes();
 
-  Future<int> clearCoverCache() async {
-    final freed = await CoverService.clearEmbeddedCache();
-    notifyListeners();
-    return freed;
-  }
+  Future<int> clearCoverCache() => covers.clearCache();
 
-  Future<void> setCoverCacheLimit(int mb) async {
-    _coverCacheLimitMB = mb.clamp(0, 8192);
-    await SettingsService.instance.setCoverCacheLimitMB(_coverCacheLimitMB);
-    if (_coverCacheLimitMB > 0) {
-      await CoverService.enforceLimit(_coverCacheLimitMB * 1024 * 1024,
-          keep: _protectedCoverPaths());
-    }
-    notifyListeners();
-  }
+  Future<void> setCoverCacheLimit(int mb) => covers.setCacheLimit(mb);
 
-  Future<void> enforceCoverCacheLimit() async {
-    if (_coverCacheLimitMB <= 0) return;
-    await CoverService.enforceLimit(_coverCacheLimitMB * 1024 * 1024,
-        keep: _protectedCoverPaths());
-  }
+  Future<void> enforceCoverCacheLimit() => covers.enforceLimit();
 
   /// 清理封面缓存时不能删的封面：正在播放的曲目、当前浏览作品的封面
   Set<String> _protectedCoverPaths() {
