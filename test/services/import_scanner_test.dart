@@ -50,6 +50,17 @@ void main() {
     expect(work.tracks.map((t) => t.fileName), ['01.mp3', '02.mp3']);
   });
 
+  test('编号作品即使音频全在 01_mp3 子目录也能识别', () async {
+    await touch(root, 'RJ777777 作品/01_mp3/01.mp3');
+    await touch(root, 'RJ777777 作品/02_wav/02.wav');
+
+    final plan = await scanImportTree(root.path, writeCover: false);
+    final work = plan.works.single;
+    expect(work.code, 'RJ777777');
+    expect(work.title, '作品');
+    expect(work.trackCount, 2);
+  });
+
   test('没有音频的目录记进 skipped，不当成作品', () async {
     await touch(root, '空目录/readme.txt');
     await touch(root, 'RJ222222 真作品/01.mp3');

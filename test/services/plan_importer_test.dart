@@ -77,6 +77,88 @@ void main() {
     expect(meta.coverSource, isNull);
   });
 
+  test('作品内嵌套 01_mp3 / 02_wav 时镜像出完整文件夹树', () async {
+    final mp3 = await touch(root, 'RJ294126 作品A/01_mp3/01.mp3');
+    final wav = await touch(root, 'RJ294126 作品A/02_wav/01.wav');
+    final workDir = p.join(root.path, 'RJ294126 作品A');
+    final plan = ImportPlan(rootPath: root.path, works: [
+      ImportWork(
+        dirPath: workDir,
+        title: '作品A',
+        code: 'RJ294126',
+        tracks: [
+          ImportTrack(
+              path: mp3.path,
+              fileName: '01.mp3',
+              title: '01',
+              sizeBytes: 32),
+          ImportTrack(
+              path: wav.path,
+              fileName: '01.wav',
+              title: '01',
+              sizeBytes: 32),
+        ],
+      ),
+    ]);
+
+    await importer.apply(plan);
+
+    final work = (await db.query('works')).single;
+    final folders = await db.query('folders');
+    expect(folders.length, 3);
+    final byName = {for (final f in folders) f['name'] as String: f};
+    final rootFolder = byName['作品A']!;
+    expect(rootFolder['parent'], isNull);
+    expect(rootFolder['work_id'], work['id']);
+    for (final name in ['01_mp3', '02_wav']) {
+      final child = byName[name]!;
+      expect(child['parent'], rootFolder['id']);
+      expect(child['work_id'], work['id']);
+    }
+    final paths = await db.query('folder_paths');
+    expect(paths.length, 3);
+  });
+
+  test('重跑导入会补齐旧数据缺失的子文件夹', () async {
+    final mp3 = await touch(root, 'RJ294126 作品A/01_mp3/01.mp3');
+    final wav = await touch(root, 'RJ294126 作品A/02_wav/01.wav');
+    final workDir = p.join(root.path, 'RJ294126 作品A');
+    final plan = ImportPlan(rootPath: root.path, works: [
+      ImportWork(
+        dirPath: workDir,
+        title: '作品A',
+        code: 'RJ294126',
+        tracks: [
+          ImportTrack(
+              path: mp3.path,
+              fileName: '01.mp3',
+              title: '01',
+              sizeBytes: 32),
+          ImportTrack(
+              path: wav.path,
+              fileName: '01.wav',
+              title: '01',
+              sizeBytes: 32),
+        ],
+      ),
+    ]);
+    await importer.apply(plan);
+
+    // 模拟旧版一次性导入：只剩根文件夹与根路径映射。
+    await db.delete('folder_paths',
+        where: 'folder_id IN (SELECT id FROM folders WHERE parent IS NOT NULL)');
+    await db.delete('folders', where: 'parent IS NOT NULL');
+    expect((await db.query('folders')).length, 1);
+
+    final second = await importer.apply(plan);
+
+    expect(second.worksCreated, 0);
+    expect(second.worksSkipped, 1);
+    expect((await db.query('works')).length, 1);
+    expect((await db.query('folders')).length, 3);
+    expect((await db.query('folder_paths')).length, 3);
+  });
+
   test('有封面时作品封面与元数据一起记下来', () async {
     await touch(root, 'RJ300001 作品/01.mp3');
     await touch(root, 'RJ300001 作品/cover.jpg');

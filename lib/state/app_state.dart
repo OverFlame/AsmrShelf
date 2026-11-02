@@ -16,6 +16,7 @@ import '../services/auto_import_scanner.dart';
 import '../services/cover_finder.dart';
 import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
+import '../services/folder_tree_mirror.dart';
 import '../services/import_scanner.dart';
 import '../services/dlsite/dlsite_api.dart';
 import '../services/dlsite/dlsite_cover.dart';
@@ -770,12 +771,52 @@ class AppState extends ChangeNotifier {
   Future<void> enterWork(int workId) async {
     final work = await _workDao.getById(workId);
     if (work == null) return;
+    // 旧版一次性导入只建根文件夹，曲目全在子目录里，点进作品会显示为空。
+    // 进入前按 media 路径补齐一次树；幂等，正常导入的作品只会多一次查询。
+    await _repairWorkFolderTree(work);
     // 从系列页进的，面包屑保留系列；从首页进的就没有系列节点。
     library.showWork(work, series: library.currentSeries);
     // 元数据先装进内存，详情头同步读，省一次闪烁。
     await dlsite.prefetch(workId);
     library.setCurrentWork(await _workDao.getById(workId) ?? work);
     await refresh();
+  }
+
+  /// 一次性导入的旧数据兼容：根文件夹存在、却没有子文件夹，但根目录下确实
+  /// 有曲目时，按 media 路径重建目录树。
+  Future<void> _repairWorkFolderTree(Work work) async {
+    final workId = work.id;
+    if (workId == null) return;
+    final roots = await _folderDao.listRootsByWork(workId);
+    if (roots.length > 1) return;
+
+    var rootPath = work.rootPath;
+    if (roots.length == 1) {
+      // 优先用已经落库的根路径，避免大小写/尾斜杠差异让 ensureByPath 又建
+      // 一个同名的根文件夹。
+      final paths = await _folderDao.getPaths(roots.first.id!);
+      if (paths.isNotEmpty) rootPath = paths.first.path;
+    }
+    if (rootPath == null || rootPath.trim().isEmpty) {
+      return;
+    }
+
+    if (roots.length == 1) {
+      final children = await _folderDao.listChildren(roots.first.id!);
+      if (children.isNotEmpty) return;
+    }
+
+    // 不能因为根目录里有直属曲目就提前返回：旧数据可能同时有根目录曲目和
+    // 01_mp3 / 02_wav 子目录曲目，后者同样需要补出文件夹。
+    final tracks = await _trackDao.queryByDirs([rootPath]);
+    if (tracks.isEmpty) return;
+    await FolderTreeMirror(_folderDao).ensureForPaths(
+      rootPath: rootPath,
+      rootName: work.name,
+      workId: workId,
+      mediaPaths: tracks.map((t) => t.path),
+    );
+    logInfo('AppState', '补齐作品文件夹树: ${work.name} (${tracks.length} 首)');
   }
 
   /// 点开系列「大作品」，进入与全部作品页相同的封面视图。

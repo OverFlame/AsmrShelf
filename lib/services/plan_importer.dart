@@ -1,8 +1,9 @@
 /// 把 [ImportPlan] 落库。
 ///
-/// 一次性导入工具的执行层：每部作品建一行 `works`、一个根文件夹、一批
-/// `media` 行，再写 `work_metadata`（RJ 号与封面来源）。重复跑不会产生重复
-/// 作品：靠 `works.root_path` 判重。
+/// 一次性导入工具的执行层：每部作品建一行 `works`、根文件夹及按媒体路径
+/// 镜像出的子文件夹、一批 `media` 行，再写 `work_metadata`（RJ 号与封面来源）。
+/// 重复跑不会产生重复作品：靠 `works.root_path` 判重；已存在的作品会顺手
+/// 补齐旧版本遗漏的子文件夹。
 library;
 
 import 'package:sqflite_common/sqlite_api.dart';
@@ -11,6 +12,7 @@ import '../db/folder_dao.dart';
 import '../db/media_dao.dart';
 import '../db/work_dao.dart';
 import '../db/work_metadata_dao.dart';
+import 'folder_tree_mirror.dart';
 import 'import_scanner.dart';
 
 /// 一次落库的结果。
@@ -51,6 +53,7 @@ class PlanImporter {
     final folderDao = FolderDao(db);
     final mediaDao = MediaDao(db);
     final metaDao = WorkMetadataDao(db);
+    final mirror = FolderTreeMirror(folderDao);
 
     var created = 0;
     var skipped = 0;
@@ -61,6 +64,14 @@ class PlanImporter {
     for (final work in plan.works) {
       final existingId = await _workIdByRootPath(work.dirPath);
       if (existingId != null) {
+        // 旧版本只建了根文件夹；重跑导入时顺手补齐目录树，避免旧数据永远
+        // 停在「有曲目、点进去却为空」的状态。
+        await mirror.ensureForPaths(
+          rootPath: work.dirPath,
+          rootName: work.title,
+          workId: existingId,
+          mediaPaths: work.tracks.map((t) => t.path),
+        );
         skipped++;
         continue;
       }
@@ -71,8 +82,12 @@ class PlanImporter {
       await db.update('works', {'root_path': work.dirPath},
           where: 'id = ?', whereArgs: [workId]);
 
-      final folder = await folderDao.create(work.title, workId: workId);
-      await folderDao.addPath(folder.id!, work.dirPath);
+      await mirror.ensureForPaths(
+        rootPath: work.dirPath,
+        rootName: work.title,
+        workId: workId,
+        mediaPaths: work.tracks.map((t) => t.path),
+      );
 
       final addedAt = DateTime.now().millisecondsSinceEpoch;
       final rows = <Map<String, Object?>>[

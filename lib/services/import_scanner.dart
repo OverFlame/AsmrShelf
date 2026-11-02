@@ -152,7 +152,10 @@ Future<ImportPlan> scanImportTree(
 
   final top = await subdirsOf(root, 1);
   for (final dir in top) {
-    if (await looksLikeWork(dir)) {
+    // 编号作品即使音频全在 01_mp3 / 02_wav 这类子目录里，也应该直接认作作品；
+    // 只看直属文件会把这类目录误判成外层目录。
+    final coded = parseWorkCode(p.basename(dir.path)) != null;
+    if (coded || await looksLikeWork(dir)) {
       await scanWork(dir);
       continue;
     }

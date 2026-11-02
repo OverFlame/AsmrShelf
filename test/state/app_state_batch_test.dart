@@ -49,9 +49,64 @@ void main() {
     return work.id!;
   }
 
+  Future<int> seedLegacyNestedWork(String name, {bool withRoot = true}) async {
+    final work = await WorkDao(db).create(name);
+    final root = Directory(p.join(tmp.path, name))..createSync(recursive: true);
+    Directory(p.join(root.path, '01_mp3')).createSync(recursive: true);
+    Directory(p.join(root.path, '02_wav')).createSync(recursive: true);
+    await db.update('works', {'root_path': root.path},
+        where: 'id = ?', whereArgs: [work.id]);
+    if (withRoot) {
+      final folder = await FolderDao(db).create(name, workId: work.id);
+      await FolderDao(db).addPath(folder.id!, root.path);
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await db.insert('media', {
+      'path': p.join(root.path, '01_mp3', '01.mp3'),
+      'media_type': 'audio',
+      'filename': '01.mp3',
+      'added_at': now,
+    });
+    await db.insert('media', {
+      'path': p.join(root.path, '02_wav', '01.wav'),
+      'media_type': 'audio',
+      'filename': '01.wav',
+      'added_at': now,
+    });
+    return work.id!;
+  }
+
   Future<void> settleRefresh() async {
     await state.refresh();
   }
+
+  test('进入旧版一次性导入的作品时补齐子文件夹树', () async {
+    final id = await seedLegacyNestedWork('旧作品');
+    await state.refresh();
+    final root = (await FolderDao(db).listRootsByWork(id)).single;
+    expect(await FolderDao(db).listChildren(root.id!), isEmpty);
+
+    await state.enterWork(id);
+
+    final children = await FolderDao(db).listChildren(root.id!);
+    expect(children.map((f) => f.name), ['01_mp3', '02_wav']);
+
+    await state.enterFolder(root.id!);
+    expect(state.centerFolders.map((f) => f.name), ['01_mp3', '02_wav']);
+  });
+
+  test('作品完全没有根文件夹时也能补出整棵树', () async {
+    final id = await seedLegacyNestedWork('无根作品', withRoot: false);
+    await state.refresh();
+    expect(await FolderDao(db).listRootsByWork(id), isEmpty);
+
+    await state.enterWork(id);
+
+    final root = (await FolderDao(db).listRootsByWork(id)).single;
+    expect(root.name, '无根作品');
+    final children = await FolderDao(db).listChildren(root.id!);
+    expect(children.map((f) => f.name), ['01_mp3', '02_wav']);
+  });
 
   test('deleteWorks 删掉多部作品并清空选中', () async {
     final a = await seedWork('作品A');
