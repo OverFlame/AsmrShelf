@@ -27,6 +27,7 @@ import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
+import 'import_state.dart';
 import 'settings_state.dart';
 import '../services/subtitle_parser.dart';
 import '../services/subtitle_service.dart';
@@ -179,17 +180,16 @@ class AppState extends ChangeNotifier {
 
 
   // ── 导入状态 ──
-  bool _importing = false;
-  bool get importing => _importing;
-  double _importProgress = 0;
-  double get importProgress => _importProgress;
+  /// 导入进度与并发守卫拆到了 [ImportState]。
+  final ImportState importState = ImportState();
+  bool get importing => importState.importing;
+  double get importProgress => importState.progress;
 
   /// 最近一次导入的失败原因；null 表示上次导入没有出错。
   ///
   /// 导入的调用方是按钮回调，没有错误边界，所以不往上抛异常；改成把这个字段
   /// 交给界面，让失败可见，而不是只写一行日志当没事发生。
-  String? _importError;
-  String? get importError => _importError;
+  String? get importError => importState.error;
 
   // ── 最近播放 ──
   List<TrackItem> _recentTracks = [];
@@ -1280,8 +1280,8 @@ class AppState extends ChangeNotifier {
       if (imported == 0) {
         // 一条都没落库就删掉刚建的作品：可能是并发插入被 UNIQUE 忽略，
         // 也可能是这次导入直接失败（建树失败时曲目还没开始写，所以也是 0）。
-        // 失败原因留在 _importError 里给界面显示。
-        final why = _importError ?? '没有新曲目落库';
+        // 失败原因留在 importState 里给界面显示。
+        final why = importState.error ?? '没有新曲目落库';
         logWarn('AppState', '导入没有落库（$why），删除空作品: ${work.name}');
         await _workDao.delete(work.id!);
         return null;
@@ -1333,7 +1333,7 @@ class AppState extends ChangeNotifier {
           await _runImport(dirPath, work.id!, scan: scan, library: library);
     }
     if (imported == 0) {
-      final why = _importError ?? '没有新条目落库';
+      final why = importState.error ?? '没有新条目落库';
       logWarn('AppState', '导入没有落库（$why），删除空作品: ${work.name}');
       await _workDao.delete(work.id!);
       return null;
@@ -1385,10 +1385,10 @@ class AppState extends ChangeNotifier {
       logInfo('AppState',
           '$library 导入落库 $imported 条（扫描 ${paths.length} 条）: $dirPath');
     } catch (e) {
-      _importError = e.toString();
+      importState.fail(e);
       logError('AppState', '$library 导入失败', e.toString());
     } finally {
-      _importProgress = imported > 0 ? 1.0 : 0.0;
+      importState.reportProgress(imported > 0 ? 1.0 : 0.0);
       _folderVersion++;
       await refresh();
     }
@@ -1648,20 +1648,13 @@ class AppState extends ChangeNotifier {
   /// 标志必须在第一个 await 之前置上：两次导入同时进来时，第二次要在这里就被挡住，
   /// 不能等 `_runImport` 里再判断。
   bool _beginImport(String caller) {
-    if (_importing) {
-      logWarn('AppState', '$caller: 已有导入进行中，忽略本次请求');
-      return false;
-    }
-    _importing = true;
-    _importProgress = 0;
-    _importError = null;
+    if (!importState.begin(caller)) return false;
     notifyListeners();
     return true;
   }
 
   void _endImport() {
-    _importing = false;
-    _importProgress = 0;
+    importState.end();
     notifyListeners();
   }
 
@@ -1679,14 +1672,13 @@ class AppState extends ChangeNotifier {
       final throttle = ProgressThrottle();
       await for (final p in stream) {
         imported++;
-        _importProgress = p.percent;
+        importState.reportProgress(p.percent);
         if (throttle.shouldNotify(p.percent)) notifyListeners();
       }
     } catch (e) {
-      _importError = e.toString();
+      importState.fail(e);
       logError('AppState', '导入失败', e.toString());
     } finally {
-      _importProgress = 0;
       notifyListeners();
       _folderVersion++;
       await refresh();
@@ -1822,7 +1814,7 @@ class AppState extends ChangeNotifier {
       }
       return work;
     } catch (e) {
-      _importError = e.toString();
+      importState.fail(e);
       logError('AppState', '系列导入失败', e.toString());
       return null;
     } finally {
@@ -1879,7 +1871,7 @@ class AppState extends ChangeNotifier {
       }
       logInfo('AppState', '批量导入完成：子目录 ${children.length} 个，新建作品 $created 个');
     } catch (e) {
-      _importError = e.toString();
+      importState.fail(e);
       logError('AppState', '批量导入失败', e.toString());
     } finally {
       _endImport();
@@ -2699,7 +2691,7 @@ class AppState extends ChangeNotifier {
       throw StateError('数据目录迁移已在进行中');
     }
     // 导入不停就关库：在途的写入与 refresh 会打在已关闭的连接上。
-    if (_importing) {
+    if (importing) {
       throw StateError('正在导入，等导入结束再迁移数据目录');
     }
     _migrating = true;
