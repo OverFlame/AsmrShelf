@@ -12,10 +12,14 @@ import '../db/media_dao.dart';
 import '../db/tag_dao.dart';
 import '../db/track_dao.dart';
 import '../db/work_dao.dart';
+import '../db/work_metadata_dao.dart';
 import '../services/cover_service.dart';
 import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
 import '../services/import_scanner.dart';
+import '../services/dlsite/dlsite_api.dart';
+import '../services/dlsite/dlsite_repository.dart';
+import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
 import '../services/plan_importer.dart';
 import '../services/play_position.dart';
@@ -56,6 +60,9 @@ class AppState extends ChangeNotifier {
 
   /// 外链播放器。用例注入假实现，界面用例才能断言交给系统的命令
   final VideoLauncher _launcher;
+
+  /// 抓 DLsite 元数据用的接口层。用例注入假传输层，避免真联网。
+  final DlsiteApi? dlsiteApi;
 
   // ── 作品集 ──
   List<Work> _works = [];
@@ -344,7 +351,9 @@ class AppState extends ChangeNotifier {
   AppState({
     required this.player,
     VideoLauncher? videoLauncher,
-  })  : _launcher = videoLauncher ?? VideoLauncher();
+    this.dlsiteApi,
+  }) : _launcher = videoLauncher ?? VideoLauncher();
+
 
   Future<void> init() async {
     logInfo('AppState', 'Initializing...');
@@ -1536,6 +1545,32 @@ class AppState extends ChangeNotifier {
   }
 
   /// 导入目录到指定作品（合并）
+  /// 给一部作品抓 DLsite 元数据。
+  ///
+  /// 编号优先按作品目录名解析，目录名没有再看库里登记过的编号。抓不到时返回
+  /// 带说明的结果，不抛异常，界面直接拿去弹提示。
+  Future<DlsiteFetchResult> fetchDlsiteMetadata(
+    int workId, {
+    bool applyCover = false,
+  }) async {
+    final work = await _workDao.getById(workId);
+    final folderName = work?.rootPath == null
+        ? null
+        : p.basename(work!.rootPath!).trim();
+    final code = (folderName == null ? null : parseWorkCode(folderName)?.code) ??
+        (await WorkMetadataDao(DatabaseManager.instance.db).getByWork(workId))
+            ?.rjCode;
+    if (code == null) {
+      return const DlsiteFetchResult(message: '这部作品的目录名里没有 RJ 号，先改名或手动填编号');
+    }
+    final result = await DlsiteRepository(
+      DatabaseManager.instance.db,
+      api: dlsiteApi,
+    ).fetchForWork(workId, code, applyCover: applyCover);
+    if (result.ok) notifyListeners();
+    return result;
+  }
+
   /// 从一个根目录一次性导入多部作品（每部作品一个子目录）。
   ///
   /// 只扫描不落库，给界面先弹预览用。

@@ -354,6 +354,13 @@ class _VisualToolbar extends StatelessWidget {
                   icon: const Icon(Icons.create_new_folder_outlined, size: 18),
                   onPressed: () => _addFolderToWork(context),
                 ),
+              if (!compact && appState.currentWork != null)
+                IconButton(
+                  key: ValueKey('audio-toolbar-dlsite'),
+                  tooltip: '抓取 DLsite 元数据',
+                  icon: const Icon(Icons.cloud_download_outlined, size: 18),
+                  onPressed: () => _fetchDlsite(context),
+                ),
               if (!compact) ...[
                 IconButton(
                   key: ValueKey('audio-toolbar-tags'),
@@ -461,6 +468,12 @@ class _VisualToolbar extends StatelessWidget {
                           value: 'addFolder',
                           child: const Text('添加文件夹到本作品',
                               style: TextStyle(fontSize: 13))),
+                    if (appState.currentWork != null)
+                      PopupMenuItem(
+                          key: ValueKey('audio-toolbar-dlsite'),
+                          value: 'dlsite',
+                          child: const Text('抓取 DLsite 元数据',
+                              style: TextStyle(fontSize: 13))),
                   ],
                 ),
               const SizedBox(width: 4),
@@ -499,6 +512,9 @@ class _VisualToolbar extends StatelessWidget {
       case 'addFolder':
         _addFolderToWork(context);
         break;
+      case 'dlsite':
+        _fetchDlsite(context);
+        break;
       default:
         // 极窄时排序项挂在「更多」里，值形如 sort:name
         if (action.startsWith('sort:')) {
@@ -522,6 +538,29 @@ class _VisualToolbar extends StatelessWidget {
   }
 
   /// 把磁盘上的一个文件夹补进当前作品：图片、视频、音频一次都收。
+  /// 按作品目录名里的编号抓一次 DLsite 元数据。
+  ///
+  /// 抓不到时把原因原样弹给用户（没有编号、被限制、网络不通），不做静默失败。
+  Future<void> _fetchDlsite(BuildContext context) async {
+    final appState = context.read<AppState>();
+    final workId = appState.currentWork?.id;
+    if (workId == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+      content: Text('正在抓取 DLsite 元数据…'),
+      duration: Duration(minutes: 1),
+    ));
+    final result = await appState.fetchDlsiteMetadata(workId);
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+    final text = result.ok
+        ? '已抓到 ${result.work!.workNo}：${result.work!.title}'
+            '${result.fromCache ? '（本地缓存）' : ''}'
+            '${result.grantedTags > 0 ? '，新增 ${result.grantedTags} 个标签' : ''}'
+        : result.message;
+    messenger.showSnackBar(SnackBar(content: Text(text)));
+  }
+
   Future<void> _addFolderToWork(BuildContext context) async {
     final appState = context.read<AppState>();
     final workId = appState.currentWork?.id;

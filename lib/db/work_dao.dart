@@ -9,6 +9,9 @@ class Work {
   /// 库归属：audio / video（BUILD_GUIDE 第 18.2 节）
   final String library;
   final String? coverPath;
+
+  /// 作品根目录（一次性导入时写入）。目录树里没有的作品为 null。
+  final String? rootPath;
   final int sortOrder;
   final int createdAt;
 
@@ -17,6 +20,7 @@ class Work {
     required this.name,
     this.library = 'audio',
     this.coverPath,
+    this.rootPath,
     this.sortOrder = 0,
     required this.createdAt,
   });
@@ -26,6 +30,7 @@ class Work {
         'name': name,
         'library': library,
         'cover_path': coverPath,
+        'root_path': rootPath,
         'sort_order': sortOrder,
         'created_at': createdAt,
       };
@@ -35,6 +40,7 @@ class Work {
         name: map['name'] as String,
         library: (map['library'] as String?) ?? 'audio',
         coverPath: map['cover_path'] as String?,
+        rootPath: map['root_path'] as String?,
         sortOrder: map['sort_order'] as int? ?? 0,
         createdAt: map['created_at'] as int,
       );
