@@ -113,19 +113,21 @@ void main() {
     expect(await versionOf(dbPath), 9);
   });
 
-  test('确认后数据库才升到当前版本，原数据被清空但备份还在', () async {
+  test('备份之后仍然拒绝打开版本不一致的库，数据一条不丢', () async {
     await seedVersion(9);
     final plan = await MigrationGuard.instance.inspect();
     final backup = await MigrationGuard.instance.backup(plan!);
 
-    await DatabaseManager.instance.init();
+    // 新契约：备份是退路，不是升级手段。版本对不上就不打开。
+    await expectLater(
+        DatabaseManager.instance.init(), throwsA(isA<StateError>()));
 
-    expect(await versionOf(dbPath), Tables.version);
-    expect(await DatabaseManager.instance.db.query('media'), isEmpty);
+    expect(await versionOf(dbPath), 9);
     expect(await File(backup.backupPath).exists(), isTrue);
     expect(await versionOf(backup.backupPath), 9);
-    // 升级完再检查就是最新版，不会反复弹窗。
-    expect(await MigrationGuard.instance.inspect(), isNull);
+
+    // 检查仍然报告不一致：不会静默放行。
+    expect(await MigrationGuard.instance.inspect(), isNotNull);
   });
 
   test('超过上限时只留最近的备份', () async {

@@ -225,6 +225,9 @@ Future<Database> reopenLatest(String path) async {
       onUpgrade: (db, oldVersion, newVersion) async {
         await Tables.applyMigrations(db, oldVersion, newVersion);
       },
+      onDowngrade: (db, oldVersion, newVersion) async {
+        await Tables.applyMigrations(db, oldVersion, newVersion);
+      },
     ),
   );
 }
@@ -501,7 +504,7 @@ void main() {
     await db.close();
   });
 
-  test('v9 老库带着 reading_spreads 升级：外键开着也能清库重建', () async {
+  test('版本不一致的 v9 老库：拒绝打开，不删表重建', () async {
     final path = '${dir.path}/v9_real.db';
     final old = await openLegacy(path, 9, _v9Statements);
     await old.insert('works', {
@@ -530,37 +533,18 @@ void main() {
       'right_media_id': 1,
     });
     await old.close();
+    // 新契约：版本对不上就拒绝打开，不删表也不重建
+    await expectLater(reopenLatest(path), throwsA(isA<StateError>()));
 
-    final db = await reopenLatest(path);
-
-    final names = (await db.rawQuery(
-            "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"))
-        .map((r) => r['name'] as String)
-        // sqlite_sequence 是 AUTOINCREMENT 自带的，不算残留
-        .where((n) => !n.startsWith('sqlite_'))
-        .toSet();
-    // 一张不留：老库里的 reading_spreads 与 images 视图都不该剩下来
-    expect(names, {
-      'works',
-      'media',
-      'folders',
-      'folder_paths',
-      'tags',
-      'media_tags',
-      'folder_tags',
-      'play_history',
-      'media_segments',
-      'reading_progress',
-      'tracks',
-    });
-    expect(await db.getVersion(), Tables.version);
-    // 重建之后照常能用
-    await WorkDao(db).create('新作品', library: 'media');
-    expect((await db.query('works')).length, 1);
-    await db.close();
+    // 拒绝之后文件仍在，老结构与老行原样保留
+    final check = await databaseFactoryFfi.openDatabase(path,
+        options: OpenDatabaseOptions(readOnly: true));
+    expect(await check.getVersion(), 9);
+    expect(await check.query('works'), hasLength(1));
+    expect(await check.query('media'), hasLength(1));
+    await check.close();
   });
-
-  test('v9 升 v10：结构不兼容就删表重建，老行与旧结构一起清掉', () async {
+  test('版本不一致的 v9 库：老行一条不丢', () async {
     final path = '${dir.path}/v9.db';
     final old = await openLegacy(path, 9, _v9Statements);
     await old.insert('works', {
@@ -587,43 +571,18 @@ void main() {
     });
     expect(await old.getVersion(), 9);
     await old.close();
+    // 新契约：版本对不上就拒绝打开，不删表也不重建
+    await expectLater(reopenLatest(path), throwsA(isA<StateError>()));
 
-    final db = await reopenLatest(path);
-    expect(await db.getVersion(), Tables.version);
-
-    // 老行清空：非兼容式升级按删表重建处理
-    expect(await db.query('works'), isEmpty);
-    expect(await db.query('folders'), isEmpty);
-    expect(await db.query('media'), isEmpty);
-
-    // 结构是新版：旧列与旧视图都不在了
-    final mediaColumns = await _columns(db, 'media');
-    expect(mediaColumns, isNot(contains('hash')));
-    expect(mediaColumns, isNot(contains('note')));
-    expect(mediaColumns, contains('play_position_ms'));
-    expect(await _columns(db, 'works'), isNot(contains('cover_crop')));
-    final objs = await db.rawQuery(
-        "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view')");
-    final views =
-        objs.where((r) => r['type'] == 'view').map((r) => r['name']).toSet();
-    expect(views, {'tracks'}, reason: '老的 images 视图要跟着删掉');
-    final tables = objs
-        .where((r) => r['type'] == 'table')
-        .map((r) => r['name'])
-        .toSet();
-    expect(tables, isNot(contains('reading_spreads')));
-
-    // 新库能直接收下多媒体作品与多媒体文件夹
-    await db.insert('works',
-        {'name': '混合集', 'library': 'media', 'sort_order': 0, 'created_at': 12});
-    await db.insert('folders',
-        {'name': '混合根', 'parent': null, 'library': 'media', 'work_id': 1});
-    expect(
-        (await db.rawQuery('PRAGMA integrity_check')).first.values.first, 'ok');
-    await db.close();
+    // 拒绝之后文件仍在，老结构与老行原样保留
+    final check = await databaseFactoryFfi.openDatabase(path,
+        options: OpenDatabaseOptions(readOnly: true));
+    expect(await check.getVersion(), 9);
+    expect(await check.query('works'), hasLength(1));
+    expect(await check.query('media'), hasLength(1));
+    await check.close();
   });
-
-  test('更老的 v6 库走同一条删表重建，不依赖版本链', () async {
+  test('更老的 v6 库同样拒绝打开，不依赖版本链', () async {
     final path = '${dir.path}/v6.db';
     final old = await openLegacy(path, 6, _v6Statements);
     await old.insert('works', {
@@ -646,18 +605,17 @@ void main() {
     });
     expect(await old.getVersion(), 6);
     await old.close();
+    // 新契约：版本对不上就拒绝打开，不删表也不重建
+    await expectLater(reopenLatest(path), throwsA(isA<StateError>()));
 
-    final db = await reopenLatest(path);
-    expect(await db.getVersion(), Tables.version);
-    expect(await db.query('works'), isEmpty);
-    expect(await db.query('media'), isEmpty);
-    expect(await _columns(db, 'media'), contains('sort_key'));
-    expect(await _columns(db, 'media'), isNot(contains('hash')));
-    expect(
-        (await db.rawQuery('PRAGMA integrity_check')).first.values.first, 'ok');
-    await db.close();
+    // 拒绝之后文件仍在，老结构与老行原样保留
+    final check = await databaseFactoryFfi.openDatabase(path,
+        options: OpenDatabaseOptions(readOnly: true));
+    expect(await check.getVersion(), 6);
+    expect(await check.query('works'), hasLength(1));
+    expect(await check.query('media'), hasLength(1));
+    await check.close();
   });
-
   test('版本号没变就不动库：重开同版本不清数据', () async {
     final path = '${dir.path}/same.db';
     final db = await openFresh(path);

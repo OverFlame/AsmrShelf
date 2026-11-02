@@ -73,3 +73,37 @@
 
 1. `kMediaLibrary` 常量随 `folder_panel.dart` 一起删除，`kAudioLibrary` 留在 `lib/pages/home_page.dart:19`。
 2. 视觉服务的删除不放在本层：`AppState` 仍是 3302 行的单体，先删服务会留下大量悬空引用，留到阶段四按状态对象拆解时一并清掉。
+
+## 2026-11-02 阶段三：schema v1 与拒绝降级
+
+### 目标
+
+把数据库版本定到 v1，加两张阶段六要用的表，并把「版本对不上就删表重建」改成拒绝打开。不删用户数据是这一阶段的硬要求。
+
+### 动作
+
+| 项 | 改动 | 位置 |
+|---|---|---|
+| 版本号 | `version = 10` 改成 `1` | `lib/db/tables.dart:10` |
+| 新表 | `work_tags`（作品↔标签）、`work_metadata`（RJ 号、简介、封面来源、raw_json） | `lib/db/tables.dart` |
+| 迁移策略 | `applyMigrations` 不再 `dropAll` 加 `createAll`，版本不一致直接抛 `StateError` | `lib/db/tables.dart` |
+| 开库 | 补 `onDowngrade`，库比应用新时同样拒绝 | `lib/db/database.dart` |
+| 阅读进度 | 删 `reading_progress_service.dart` 与 `AppState` 里的阅读会话 | `lib/services/`、`lib/state/app_state.dart` |
+| 测试 | 三个「升级即清库」用例改成「拒绝打开且老行不丢」；守卫用例改成「备份后仍拒绝」 | `test/db_migration_test.dart`、`test/services/migration_guard_test.dart` |
+
+`work_metadata.rj_code` 带 UNIQUE 约束，按编号反查作品用得上。`cover_source` 记录封面来自 DLsite、本地目录还是音频内嵌。
+
+### 偏差与理由
+
+1. **多媒体相关列暂留**：`media` 的 `width`/`height`/`image|video` 类型值、`folders` 的阅读方向与裁剪列都还在。删列要连带改 `MediaDao`、`AppState` 与大批判词，而 `AppState` 3302 行要到阶段四才拆。先把表加上，删列跟阶段四一起做，避免中途库结构改两遍。
+2. **`folder_tags` 保留**：文件夹层标签仍在 `FolderBrowser` 里用，作品层标签是新增的 `work_tags`。两套并存到阶段五重做界面时再合并。
+3. **`dropAll` 保留**：只给测试造空库用，开库路径不再调用它。
+
+### 验证
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 静态分析 | `flutter analyze --no-fatal-infos` | No issues found |
+| 单元与控件测试 | `flutter test` | 521 例全部通过 |
+| 版本拒绝 | `test/db_migration_test.dart` 三个用例 | v6、v9 老库均抛 `StateError`，老行原样保留 |
+| 备份守卫 | `test/services/migration_guard_test.dart` | 备份文件存在、库里仍是 v9、检查仍报不一致 |

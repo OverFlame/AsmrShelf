@@ -18,7 +18,6 @@ import '../services/file_scanner.dart';
 import '../services/import_service.dart';
 import '../services/play_position.dart';
 import '../services/playlist_writer.dart';
-import '../services/reading_progress_service.dart';
 import '../services/segment_service.dart';
 import '../services/settings_service.dart';
 import '../services/subtitle_parser.dart';
@@ -839,7 +838,6 @@ class AppState extends ChangeNotifier {
   /// 直接调这里的都是「浏览」：顺手结束上一个阅读会话，避免把浏览的
   /// 翻页记到某个卷的进度上。阅读模式走 [openVolumeReader]。
   void openViewer(List<MediaItem> images, int startIndex) {
-    _readingVolumeId = null;
     _viewerImages = List<MediaItem>.from(images);
     _viewerIndex = _viewerImages.isEmpty
         ? 0
@@ -850,13 +848,10 @@ class AppState extends ChangeNotifier {
   }
 
   void closeViewer() {
-    final volumeId = _readingVolumeId;
-    _readingVolumeId = null;
     _showViewer = false;
     _viewerImages = [];
     _viewerIndex = 0;
     notifyListeners();
-    if (volumeId != null) unawaited(flushReadingProgress());
   }
 
   /// 查看器中导航（方向：-1=上一张, 1=下一张）。越界不动。
@@ -864,7 +859,6 @@ class AppState extends ChangeNotifier {
     final newIndex = _viewerIndex + direction;
     if (newIndex >= 0 && newIndex < _viewerImages.length) {
       _viewerIndex = newIndex;
-      _recordReading();
       _syncSelectedToViewer();
       notifyListeners();
     }
@@ -1568,7 +1562,6 @@ class AppState extends ChangeNotifier {
     if (_viewerImages.isEmpty) {
       _viewerIndex = 0;
       _showViewer = false;
-      _readingVolumeId = null;
     } else if (_viewerIndex >= _viewerImages.length) {
       _viewerIndex = _viewerImages.length - 1;
     }
@@ -2052,96 +2045,6 @@ class AppState extends ChangeNotifier {
     _subtitleCache.clear();
     notifyListeners();
   }
-
-  // ═══════════════ 阅读进度（BUILD_GUIDE 第 22.6 节）═══════════════
-
-  ReadingProgressService? _readingService;
-
-  /// 记下服务绑定的数据库实例。只用来比对象身份，不调用任何方法，
-  /// 所以这里不为了一个类型名去 import sqflite。
-  Object? _readingServiceDb;
-
-  /// 节流状态要活过单次调用，所以服务实例缓存起来；数据库换了实例就重建。
-  @visibleForTesting
-  ReadingProgressService get readingService {
-    final db = DatabaseManager.instance.db;
-    if (_readingService == null || !identical(_readingServiceDb, db)) {
-      // 换库实例说明旧连接已经关掉或正在关：旧服务里攒着的进度要趁早落盘，
-      // 否则节流窗口里那一页会打到已关闭的连接上，异常只留一条日志。
-      final stale = _readingService;
-      if (stale != null) unawaited(stale.dispose());
-      _readingService = ReadingProgressService(db);
-      _readingServiceDb = db;
-    }
-    return _readingService!;
-  }
-
-  /// 关库、退出前把阅读进度落盘。服务自己带节流窗口，不落盘就会丢一页。
-  ///
-  /// 之后再用 [readingService] 会新建实例（老实例已 dispose）。
-  Future<void> disposeReadingService() async {
-    final service = _readingService;
-    _readingService = null;
-    _readingServiceDb = null;
-    await service?.dispose();
-  }
-
-  Future<ReadingProgress?> readingProgressOf(int volumeId) =>
-      readingService.get(volumeId);
-
-  /// 非空表示查看器正以阅读模式打开某个卷，翻页会记进度。
-  int? _readingVolumeId;
-  int? get readingVolumeId => _readingVolumeId;
-
-  /// 从卷上进入阅读（BUILD_GUIDE 第 22.6、22.7 节）。
-  ///
-  /// 有上次进度就接着看：先按 media_id 找，找不到再按页号兜。返回 false
-  /// 表示这个卷里没有可阅读的图片，调用方据此提示。
-  Future<bool> openVolumeReader(int volumeId) async {
-    final images = await imagesInFolder(volumeId);
-    if (images.isEmpty) return false;
-    var start = 0;
-    final progress = await readingProgressOf(volumeId);
-    if (progress != null) {
-      final matched = images.indexWhere((m) => m.id == progress.mediaId);
-      start = matched >= 0
-          ? matched
-          : progress.pageIndex.clamp(0, images.length - 1);
-    }
-    openViewer(images, start);
-    _readingVolumeId = volumeId;
-    _recordReading();
-    notifyListeners();
-    return true;
-  }
-
-  /// 翻页后写一次进度，节流与落盘交给 [ReadingProgressService]。
-  void _recordReading() {
-    final volumeId = _readingVolumeId;
-    if (volumeId == null) return;
-    unawaited(recordReading(volumeId,
-        mediaId: viewerImage?.id, pageIndex: _viewerIndex));
-  }
-
-  /// 手动标记本卷已读完（第 22.6 节）。
-  Future<void> markReadFinished() async {
-    final volumeId = _readingVolumeId;
-    if (volumeId == null) return;
-    await markVolumeFinished(volumeId,
-        mediaId: viewerImage?.id, pageIndex: _viewerIndex);
-  }
-
-  /// 翻页时记录进度。写入按服务里的 1 秒窗口节流。
-  Future<void> recordReading(int volumeId,
-          {int? mediaId, required int pageIndex}) =>
-      readingService.record(volumeId, mediaId: mediaId, pageIndex: pageIndex);
-
-  Future<void> markVolumeFinished(int volumeId, {int? mediaId, int? pageIndex}) =>
-      readingService.markFinished(volumeId,
-          mediaId: mediaId, pageIndex: pageIndex);
-
-  /// 离开阅读器前强制落盘，别让最后几页只留在内存里。
-  Future<void> flushReadingProgress() => readingService.flush();
 
   // ═══════════════ 系列与卷导入（BUILD_GUIDE 第 19.5 节）═══════════════
 
@@ -3123,9 +3026,6 @@ class AppState extends ChangeNotifier {
       // 关库前先前进一代：在途的 refresh 拿到结果后发现代际不匹配会主动丢弃，
       // 不会去写已经关掉的连接。
       _refreshGeneration++;
-      // 关库前先把阅读进度落盘：服务带一秒节流窗口，攒着的那一页在
-      // close() 之后就写不进去了。
-      await disposeReadingService();
       await DatabaseManager.instance.close();
       final newD = await DataDirService.instance.migrateTo(newDir);
       // 日志跟着数据目录走，否则迁移后还往旧目录写。

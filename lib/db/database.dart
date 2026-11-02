@@ -66,7 +66,13 @@ class DatabaseManager {
         await Tables.createAll(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        logInfo('Database', 'Migrating v$oldVersion -> v$newVersion');
+        logWarn('Database', 'Refusing upgrade v$oldVersion -> v$newVersion');
+        await Tables.applyMigrations(db, oldVersion, newVersion);
+      },
+      // 库比应用新时 sqflite 走 downgrade 回调：默认什么都不做，会把新库
+      // 当成本版本继续读写。这里同样拒绝。
+      onDowngrade: (db, oldVersion, newVersion) async {
+        logWarn('Database', 'Refusing downgrade v$oldVersion -> v$newVersion');
         await Tables.applyMigrations(db, oldVersion, newVersion);
       },
     );

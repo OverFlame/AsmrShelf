@@ -1,16 +1,16 @@
 import 'package:sqflite_common/sqlite_api.dart';
 
-/// 数据库 DDL 建表语句
+/// 数据库 DDL 建表语句 — AsmrShelf schema v1
 ///
-/// v5 起音频、图片、视频与字幕共用一张 media 表，见 BUILD_GUIDE 第 7.3 节。
-/// v10 起栏目合并为「音频栏 + 多媒体栏」，库归属只剩 `audio` 与 `media`
-/// 两个值，同一个文件两个栏目共用一行。
+/// v1 的结构基线是「音频 + 字幕」：多媒体栏的表与列暂时原样留着，等阶段四
+/// 拆完 `AppState`、视觉服务全部下线后再逐列删。新增 `work_tags` 与
+/// `work_metadata` 两张表，供作品层标签与 DLsite 元数据落到库里。
 ///
-/// 结构不兼容时不做增量迁移：版本号对不上就删表重建，见 [applyMigrations]。
+/// 版本号对不上不再删表重建，见 [applyMigrations]。
 class Tables {
   Tables._();
 
-  static const int version = 10;
+  static const int version = 1;
 
   static const List<String> createStatements = [
     // 作品集：音频侧是系列，多媒体侧是剧集或漫画系列
@@ -173,6 +173,36 @@ class Tables {
     )
     ''',
 
+    // 作品↔标签 多对多：标签打在整部作品上
+    '''
+    CREATE TABLE work_tags (
+      work_id INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+      tag_id  INTEGER NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
+      PRIMARY KEY (work_id, tag_id)
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_work_tags_tag ON work_tags(tag_id)',
+
+    // DLsite 元数据：一部作品一行，raw_json 存接口原样响应
+    '''
+    CREATE TABLE work_metadata (
+      work_id          INTEGER PRIMARY KEY REFERENCES works(id) ON DELETE CASCADE,
+      rj_code          TEXT UNIQUE,
+      title            TEXT,
+      title_kana       TEXT,
+      circle           TEXT,
+      series           TEXT,
+      description      TEXT,
+      cover_url        TEXT,
+      cover_source     TEXT,
+      cover_fetched_at INTEGER,
+      raw_json         TEXT,
+      fetched_at       INTEGER,
+      updated_at       INTEGER
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_work_metadata_rj ON work_metadata(rj_code)',
+
     // 过渡视图：只读，老查询按 tracks 读，写入一律走 MediaDao。
     'CREATE VIEW IF NOT EXISTS tracks AS '
         "SELECT * FROM media WHERE media_type = 'audio'",
@@ -253,15 +283,14 @@ class Tables {
   /// 表名与列名进语句前包一层双引号。
   static String _quote(String name) => '"${name.replaceAll('"', '""')}"';
 
-  /// 版本号对不上就删表重建：开库时 onUpgrade 用。
+  /// 版本号对不上就拒绝打开：不删表，也不做半成品迁移。
   ///
-  /// v10 起不再维护增量迁移链。升级前 `MigrationGuard` 会先备份库文件，
-  /// 启动时再由确认页等用户点头；没有确认就根本不会走到这里。
-  /// 这样改 CHECK 约束、删列都不必再靠重建单表绕开，用户数据也还有退路。
+  /// 库比本应用新时回滚没有意义，交给 [MigrationGuard] 在开库之前拦下并提示；
+  /// 库比本应用旧时这一版还没有迁移链，同样拒绝，避免静默丢数据。
   static Future<void> applyMigrations(
       DatabaseExecutor db, int oldVersion, int newVersion) async {
     if (oldVersion == newVersion) return;
-    await dropAll(db);
-    await createAll(db);
+    throw StateError('数据库版本 v$oldVersion 与应用的 schema v$newVersion 不一致，'
+        '已拒绝打开。请用备份恢复或换回对应版本的应用。');
   }
 }
