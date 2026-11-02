@@ -57,6 +57,8 @@ flutter test
 | 文件 | 内容 |
 | --- | --- |
 | `docs/需求研究与设计备忘.md` | 代码理解、四项需求设计、封面回退链与写盘规则 |
+| `docs/DLsite_可获取数据说明.md` | DLsite 接口实测：能抓到什么、抓不到什么、抓取纪律 |
+| `docs/剥离阶段交接清单.md` | 阶段进度、剩余偏差、阶段四到六的接续顺序 |
 | `BUILD_GUIDE.md` | 施工手册（沿用自 MediaShelf，阶段推进时逐步改写） |
 | `PROJECT_STEPS.md` | 环境、验收、提交与版本号约定 |
 | `PROJECTLOG.md` | 逐阶段记录 |
