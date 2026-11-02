@@ -292,3 +292,21 @@
 规则：根目录每个子目录一部作品；`nested: true` 时认「社团/作品」两层；作品里的子目录照样扫，但 `特典/` 下的音频不进曲目表（那是赠品，不是正片）；曲目按自然序排；封面用 `CoverFinder` 找，默认把选中的图写进作品根目录。
 
 验证：analyze 无问题、`flutter test` 555 例全过。
+
+## 2026-11-02 一次性导入的落库层
+
+`lib/services/plan_importer.dart`：`PlanImporter(db).apply(plan)` 把扫描结果写成
+
+| 表 | 写什么 |
+|---|---|
+| `works` | 一行，`name` 用剥掉编号的标题，`library` 固定 `audio`，`cover_path` 记封面 |
+| `works.root_path` | 作品目录绝对路径，重复跑靠它判重 |
+| `folders` + `folder_paths` | 一条根文件夹，指向作品目录 |
+| `media` | 每首曲目一行，`media_type` 为 `audio`，`title` 用剥过序号的标题 |
+| `work_metadata` | 有编号或封面时写：`rj_code`、`cover_source=local`、`cover_fetched_at` |
+
+一个必须记住的 schema 事实：`media` **没有** `work_id` 也没有 `folder_id` 列。曲目与文件夹、作品的关系在查询时按路径范围算（`lib/db/path_range.dart`），落库只认 `path`。第一次写代码时按「一定有 folder_id」写，测试直接报 `table media has no column named folder_id`。
+
+`ImportOutcome` 分开数四种：新建作品、跳过作品、新增曲目、已存在曲目。
+
+验证：analyze 无问题、`flutter test` 560 例全过。
