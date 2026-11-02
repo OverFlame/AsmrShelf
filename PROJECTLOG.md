@@ -37,3 +37,39 @@
 1. 不复制 MediaShelf 的 `docs/`。剥离指南与调研文档属于源仓库，新仓库只保留自己的设计备忘。
 2. `works.cover_path` 与缓存文件前缀不改名，等阶段三建 schema 时统一处理。
 3. `image`、`exif`、`crypto` 三个依赖先保留，阶段二删视觉模块时一并去掉。
+
+## 2026-11-02 阶段二：移除多媒体界面层
+
+### 目标
+
+去掉只服务图片与视频的界面，让首页只剩音频栏一条路径。删之前先确认没有编译依赖，删之后每改一层跑一次分析。
+
+### 动作
+
+| 层 | 动作 | 结果 |
+|---|---|---|
+| 首页 | 去掉库切换条、多媒体分支、图片详情覆盖层与查看器 | `lib/pages/home_page.dart` 现在只有音频栏 |
+| 工具栏 | `_VisualToolbar` 去掉 `library`、`detailOpen`、`onToggleDetail` 三个参数与详情按钮 | 键名前缀统一 `audio-toolbar-*` |
+| 横条 | 删 `_LibrarySwitcher`、`_BreadcrumbBar`、`_AdvancedFilterBar`、`_SelectionBar` | 面包屑与高级筛选只剩多媒体栏在用 |
+| 控件 | 删 `image_grid.dart`、`image_detail.dart`、`image_viewer.dart`、`folder_panel.dart`、`volume_panel.dart` | 五个文件合计 4093 行 |
+| 服务 | 删 `exif_service.dart`（全仓零引用） | 其余视觉服务仍被 `AppState` 引用，随阶段四拆解时清除 |
+| 依赖 | 去掉 `exif`，把 `image` 降为 dev 依赖（只给缩略图缓存测试造 PNG） | 运行时不再依赖图像解码库 |
+
+### 测试
+
+删除只验被删控件的用例：`test/widget/image_grid_test.dart`、`test/widget/image_viewer_test.dart`、`test/state/app_state_images_test.dart`、`test/widget/image_dialogs_test.dart`、`test/widget/volume_panel_test.dart`。
+
+`test/widget/home_page_test.dart` 重写为音频栏五例：作品网格只列音频作品、点卡片进作品再下钻到卷、作品卡片标签菜单、窄屏十列不溢出与视图切换、工具条排序菜单只给作品字段。
+
+### 验证
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 静态分析 | `flutter analyze --no-fatal-infos` | No issues found |
+| 单元与控件测试 | `flutter test` | 540 例全部通过 |
+| 编译 | `flutter build linux --release` | 见下一步提交前的构建记录 |
+
+### 决定
+
+1. `kMediaLibrary` 常量随 `folder_panel.dart` 一起删除，`kAudioLibrary` 留在 `lib/pages/home_page.dart:19`。
+2. 视觉服务的删除不放在本层：`AppState` 仍是 3302 行的单体，先删服务会留下大量悬空引用，留到阶段四按状态对象拆解时一并清掉。
