@@ -1311,6 +1311,55 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// 以磁盘为准重扫全部音频作品：补新文件、删失联行。
+  ///
+  /// 刷新按钮走这条，普通 `refresh()` 不走：库可能有几千条路径，逐条 stat 不能
+  /// 挂在每次界面刷新上。返回给界面弹提示用的计数。
+  Future<RescanOutcome> rescanFromDisk() async {
+    final works = await _workDao.listAll();
+    var added = 0;
+    var removed = 0;
+    var missingRoots = 0;
+    for (final work in works) {
+      final root = work.rootPath?.trim();
+      if (work.library != 'audio' || root == null || root.isEmpty) continue;
+      if (!await Directory(root).exists()) {
+        missingRoots++;
+        continue;
+      }
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final rows = <Map<String, Object?>>[];
+      await for (final entity
+          in Directory(root).list(recursive: true, followLinks: false)) {
+        if (entity is! File) continue;
+        final path = entity.path;
+        if (!audioExtensions.contains(extOfPath(path))) continue;
+        final fileName = baseNameOfPath(path);
+        rows.add({
+          'path': path,
+          'media_type': MediaType.audio.value,
+          'filename': fileName,
+          'title': trackTitle(fileName),
+          'added_at': now,
+          'sort_key': sortKeyOfPath(path),
+        });
+      }
+      if (rows.isNotEmpty) added += await _mediaDao.insertRows(rows);
+      // 失联行：库里登记在这部作品下、磁盘上已经没有的音频
+      final existing =
+          await _mediaDao.queryByDirs([root], type: MediaType.audio);
+      final stale = <String>[];
+      for (final item in existing) {
+        if (!await File(item.path).exists()) stale.add(item.path);
+      }
+      removed += await _mediaDao.deleteByPaths(stale, type: MediaType.audio);
+    }
+    logInfo('AppState',
+        '重扫磁盘：新增 $added 条，删除失联 $removed 条，缺目录 $missingRoots 个');
+    return RescanOutcome(
+        added: added, removed: removed, missingRoots: missingRoots);
+  }
+
   /// 给一部作品抓 DLsite 元数据并直接落库。
   ///
   /// 编号优先按作品目录名解析，目录名没有再看库里登记过的编号。抓不到时返回
@@ -2123,4 +2172,23 @@ class AppState extends ChangeNotifier {
     if (work != null) keep.add(work);
     return keep;
   }
+}
+
+/// 一次「以磁盘为准」重扫的结果。
+class RescanOutcome {
+  const RescanOutcome({
+    this.added = 0,
+    this.removed = 0,
+    this.missingRoots = 0,
+  });
+
+  final int added;
+  final int removed;
+  final int missingRoots;
+
+  bool get changed => added > 0 || removed > 0;
+
+  @override
+  String toString() =>
+      'RescanOutcome(新增 $added, 删除 $removed, 缺目录 $missingRoots)';
 }

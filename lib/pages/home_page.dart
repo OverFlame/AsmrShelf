@@ -473,9 +473,9 @@ class _VisualToolbar extends StatelessWidget {
               if (!compact) ...[
                 IconButton(
                   key: ValueKey('audio-toolbar-refresh'),
-                  tooltip: '刷新',
+                  tooltip: '刷新（以磁盘为准）',
                   icon: const Icon(Icons.refresh, size: 18),
-                  onPressed: () => appState.refresh(),
+                  onPressed: () => _refreshFromDisk(context, appState),
                 ),
                 IconButton(
                   key: ValueKey('audio-toolbar-clear-thumbs'),
@@ -577,11 +577,28 @@ class _VisualToolbar extends StatelessWidget {
     );
   }
 
+  /// 刷新按钮：先按磁盘补齐/清理，再重查列表。
+  ///
+  /// 只查库查不出用户新拷进来的文件，也删不掉已经删掉的文件，所以这里走
+  /// `rescanFromDisk`；批量扫盘放在按钮回调里，不挂在每次界面刷新上。
+  Future<void> _refreshFromDisk(
+      BuildContext context, AppState appState) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final outcome = await appState.rescanFromDisk();
+    await appState.refresh();
+    if (!context.mounted) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text(outcome.changed
+          ? '已按磁盘刷新：新增 ${outcome.added} 首，清理 ${outcome.removed} 首'
+          : '没有发现新文件，也没有失联的曲目'),
+    ));
+  }
+
   void _onMore(BuildContext context, String action) {
     final appState = context.read<AppState>();
     switch (action) {
       case 'refresh':
-        appState.refresh();
+        _refreshFromDisk(context, appState);
         break;
       case 'clearThumbs':
         _clearThumbCaches(context);
