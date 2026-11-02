@@ -278,3 +278,17 @@
 一处必须记住的判定：`upsert` 不用 `ConflictAlgorithm.replace`。RJ 号是唯一索引，替换会静默顶掉别的作品那一行，变成「抓 A 顺手把 B 的编号抢过来」。改成显式分插入与更新，撞唯一索引就让调用方看见 `DatabaseException`。`test/db/work_metadata_dao_test.dart` 5 例覆盖，含「两个作品不能抢同一个 RJ 号」。
 
 验证：analyze 无问题、`flutter test` 546 例全过。
+
+## 2026-11-02 一次性导入的扫描层
+
+`lib/services/import_scanner.dart`：把用户整理好的目录树读成计划，不碰数据库。
+
+| 类型 | 内容 |
+|---|---|
+| `ImportTrack` | 曲目路径、文件名、剥掉序号后的标题、字节数 |
+| `ImportWork` | 作品目录、标题（目录名剥掉编号）、RJ 或 VJ 编号、封面路径与回退层、曲目表 |
+| `ImportPlan` | 根目录、作品表、`skipped`（像作品但没有音频的目录） |
+
+规则：根目录每个子目录一部作品；`nested: true` 时认「社团/作品」两层；作品里的子目录照样扫，但 `特典/` 下的音频不进曲目表（那是赠品，不是正片）；曲目按自然序排；封面用 `CoverFinder` 找，默认把选中的图写进作品根目录。
+
+验证：analyze 无问题、`flutter test` 555 例全过。
