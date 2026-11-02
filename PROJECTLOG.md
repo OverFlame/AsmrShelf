@@ -360,3 +360,24 @@ dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--d
 - `work_tags` 的挂标签走 `TagDao.attachToWork`，重复挂用 `ConflictAlgorithm.ignore`，重复抓同一部作品新增数为 0。
 
 验证：analyze 无问题、`flutter test` 585 例全过（新增 25 例：解析 8、节流 3、重试 3、落库 11）。
+
+## 2026-11-02 两个用户入口：根目录批量导入与 DLsite 抓取
+
+### 批量导入（`839420a`）
+
+`AppState` 加两个方法，界面只负责选目录与确认：
+
+| 成员 | 作用 |
+|---|---|
+| `scanWorksRoot(String rootPath, {bool nested})` | 只扫描，返回 `ImportPlan`，用来先告诉用户几部作品几首曲目 |
+| `importWorksFromRoot(String rootPath, {bool nested})` | 走 `PlanImporter` 落库后 `refresh()`；与普通导入共用 `_beginImport` 互斥标志，正在导入时返回 null |
+
+首页 AppBar 加「从目录导入作品」按钮（`home-import-works`）：选目录 → 扫描 → 确认对话框 → 导入 → 提示新建/跳过数量。测试 `test/state/app_state_import_root_test.dart` 3 例（扫描计数、导入后进列表且二次全跳过、根目录无作品时不建行）。
+
+### DLsite 抓取（`a10d152`）
+
+`AppState.fetchDlsiteMetadata(int workId, {bool applyCover})`：编号优先取作品目录名解析出的，没有再看 `work_metadata.rj_code`；没有编号时直接返回提示，不发请求。界面在作品工具条加「抓取 DLsite 元数据」按钮（`audio-toolbar-dlsite`，窄版进「更多」），结果用 SnackBar 提示，命中缓存会标出来。
+
+`Work` 模型补了 `rootPath` 字段（表里早就有 `root_path`，模型一直没读）。测试 `test/state/app_state_dlsite_test.dart` 3 例（从目录名取编号并落库+打标签、无编号不发请求、二次命中缓存）。
+
+验证：analyze 无问题、`flutter test` 591 例全过、`NO_XIPH_LIBS=1 flutter build linux --release` 成功。
