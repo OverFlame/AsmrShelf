@@ -107,3 +107,32 @@
 | 单元与控件测试 | `flutter test` | 521 例全部通过 |
 | 版本拒绝 | `test/db_migration_test.dart` 三个用例 | v6、v9 老库均抛 `StateError`，老行原样保留 |
 | 备份守卫 | `test/services/migration_guard_test.dart` | 备份文件存在、库里仍是 v9、检查仍报不一致 |
+
+## 2026-11-02 阶段收尾记录
+
+### 本次自主推进到哪一步
+
+| 阶段 | 状态 | 提交 |
+|---|---|---|
+| 一 复制与改名 | 完成 | `426764b` |
+| 二 移除多媒体界面层 | 完成界面与依赖层 | `e74e703` |
+| 三 schema v1 | 完成 | `9b1f6bc`、`2ae5c34` |
+| 四 拆 AppState | 未开始 | — |
+| 五 重做音频界面 | 未开始 | — |
+| 六 接 DLsite | 未开始 | — |
+
+### 当前基线
+
+| 项 | 数值 |
+|---|---|
+| 静态分析 | `flutter analyze --no-fatal-infos` 无问题 |
+| 测试 | 521 例全部通过（阶段一 603 例，删掉被移除功能的 82 例） |
+| Linux 构建 | `NO_XIPH_LIBS=1 flutter build linux --release` 成功 |
+| 数据库版本 | v1 |
+| `lib/state/app_state.dart` | 约 3100 行，仍是单体 |
+
+### 下一步该从哪里接
+
+1. 阶段四先把 `ImportState` 与 `CoverState` 拆出来，这两个被阶段五、六同时依赖。
+2. 拆完后再删 `media` 的 `width`/`height`、`folders` 的阅读列与 `image|video` 类型值，v1 的库结构才算收干净。
+3. 阶段五重做作品层时，`works.root_path` 与 `work_tags` 已经在库里，直接接。
