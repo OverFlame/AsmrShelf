@@ -400,3 +400,21 @@ dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--d
 一个实测结论：导入阶段本来就会写封面（`PlanImporter` 用扫描计划的 `coverPath`），所以这个入口主要用于「导入时没图、后来补了图」或「封面记录被清掉」的情况。测试 `test/state/app_state_find_cover_test.dart` 3 例（信号目录挑图并写盘、已有封面不动、无图给提示）。
 
 验证：analyze 无问题、`flutter test` 594 例全过、Linux release 构建成功。
+
+## 2026-11-02 去掉 crypto 依赖：缩略图缓存改用自带的稳定哈希
+
+剥离指南阶段一的依赖清理列了三项：`image`、`exif`、`crypto`。前两项早已处理（`exif` 删掉；`image` 只留在 `dev_dependencies`，给缩略图缓存用例造 PNG 样张）。最后一项 `crypto` 原本还在，因为缩略图缓存文件名用 `sha256` 算。
+
+改法：
+
+| 项 | 之前 | 之后 |
+|---|---|---|
+| 哈希实现 | `sha256.convert(utf8.encode(path)).toString()`，64 位十六进制 | `lib/utils/stable_hash.dart` 的 `stableHashHex`，FNV-1a 64 位，16 位十六进制 |
+| 依赖 | `crypto ^3.0.7` | 删除，`flutter pub get` 后依赖树少一个包 |
+| 缓存文件名 | 64 位十六进制 + mtime | 16 位十六进制 + mtime |
+
+为什么不用 `String.hashCode`：它是进程内实现，Dart 不保证跨版本、跨平台一致，拿它命名缓存文件会让同一路径在不同机器上落到不同文件。为什么不需要 sha256：这里只要一个短文件名，不承担密码学用途。哈希仍然走 `utf8` 字节，避免 `codeUnits` 的高位截断导致两条路径撞名（这条坑原来就写在注释里，新实现保持同样的处理）。
+
+代价：缓存目录里旧的 64 位文件名会变成孤儿文件，占空间但不会读错；需要时用「清理缩略图缓存」按钮清掉。
+
+测试：`test/utils/stable_hash_test.dart` 4 例（确定性、格式、高位码元不撞车、500 条路径无碰撞）。验证：analyze 无问题、`flutter test` 598 例全过、Linux release 构建成功。

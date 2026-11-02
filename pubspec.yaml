@@ -60,9 +60,6 @@ dependencies:
   audio_metadata_reader: ^1.7.1
   flutter_soloud: ^4.1.7
 
-  # 图片与视频栈，随 PictureViewer2 并入（BUILD_GUIDE 第 5.1 节）
-  crypto: ^3.0.7
-
   # 中文字幕解码：GBK/GB18030 的纯 Dart 实现（BUILD_GUIDE 第 23.2 节）
   fast_gbk: ^1.0.0
 

@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:ui' as ui;
 
-import 'package:crypto/crypto.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
 import 'package:asmrshelf/utils/log_util.dart';
+import 'package:asmrshelf/utils/stable_hash.dart';
 import 'package:path/path.dart' as p;
 
 /// 缩略图内存 LRU 缓存
@@ -135,8 +134,7 @@ class ThumbnailService {
   /// 用 utf8 编码而不是 `codeUnits`：`codeUnits` 是 UTF-16 码元，值可以超过
   /// 255，塞进 typed_data 时高位被截掉，只在码元高位上不同的两条路径会算出
   /// 同一个文件名，表现为缩略图串图。
-  String _hashKey(String originalPath) =>
-      sha256.convert(utf8.encode(originalPath)).toString();
+  String _hashKey(String originalPath) => stableHashHex(originalPath);
 
   /// 源文件的 mtime（毫秒）；文件不存在返回 0
   int _mtimeMs(String originalPath) {
