@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:io';
 
 // RepeatMode 与 Flutter 的同名枚举冲突，隐藏框架那个
@@ -33,6 +32,7 @@ import 'cover_state.dart';
 import 'dlsite_state.dart';
 import 'import_state.dart';
 import 'tag_filter.dart';
+import 'library_state.dart';
 import 'settings_state.dart';
 import 'tag_state.dart';
 
@@ -61,46 +61,32 @@ class AppState extends ChangeNotifier {
   /// 下载远程封面用。用例注入假字节，避免真联网。
   final DlsiteCoverDownloader? dlsiteCoverDownloader;
 
-  // ── 作品集 ──
-  List<Work> _works = [];
-  List<Work> get works => _works;
-  Work? _currentWork;
-  Work? get currentWork => _currentWork;
-  List<VirtualFolder> _unassignedFolders = [];
-  List<VirtualFolder> get unassignedFolders => _unassignedFolders;
-
-  // ── 文件夹导航 ──
-  int? _currentFolderId;
-  int? get currentFolderId => _currentFolderId;
-  VirtualFolder? _currentFolder;
-  VirtualFolder? get currentFolder => _currentFolder;
-  String? _currentFolderPath;
-  String? get currentFolderPath => _currentFolderPath;
-  List<VirtualFolder> _breadcrumb = [];
-  List<VirtualFolder> get breadcrumb => _breadcrumb;
-  int _folderVersion = 0;
-  int get folderVersion => _folderVersion;
+  // ── 作品集与导航（数据在 LibraryState）──
+  List<Work> get works => library.works;
+  Work? get currentWork => library.currentWork;
+  List<VirtualFolder> get unassignedFolders => library.unassignedFolders;
+  int? get currentFolderId => library.currentFolderId;
+  VirtualFolder? get currentFolder => library.currentFolder;
+  String? get currentFolderPath => library.currentFolderPath;
+  List<VirtualFolder> get breadcrumb => library.breadcrumb;
+  int get folderVersion => library.folderVersion;
 
   // ── 中间栏内容 ──
-  List<VirtualFolder> _centerFolders = [];
-  List<VirtualFolder> get centerFolders => _centerFolders;
+  List<VirtualFolder> get centerFolders => library.centerFolders;
   /// 播放位置落盘的节流（见 lib/services/play_position.dart）
   final PlayPositionThrottle _positionThrottle = PlayPositionThrottle();
 
-  List<TrackItem> _tracks = [];
-  List<TrackItem> get tracks => _tracks;
+  List<TrackItem> get tracks => library.tracks;
 
   /// 媒体行增删的代数，界面据此知道该重查。
   int _mediaRevision = 0;
   int get mediaRevision => _mediaRevision;
 
 
-  bool _loading = false;
-  bool get loading => _loading;
+  bool get loading => library.loading;
 
   // ── 搜索 ──
-  String _searchQuery = '';
-  String get searchQuery => _searchQuery;
+  String get searchQuery => library.searchQuery;
 
   // ── 标签（数据与逻辑在 TagState）──
   final TagState tags = TagState(
@@ -109,14 +95,11 @@ class AppState extends ChangeNotifier {
     trackDao: () => TrackDao(DatabaseManager.instance.db),
   );
 
-  // ── 曲目多选 ──
-  final Set<int> _selectedTrackIds = {};
+  // ── 曲目多选（状态在 LibraryState）──
   /// 只读视图：调用方拿不到内部集合，改不到选中状态。
-  Set<int> get selectedTrackIds => UnmodifiableSetView(_selectedTrackIds);
-  int? _anchorTrackId;
-  bool _selectionMode = false;
-  bool get selectionMode => _selectionMode;
-  bool isTrackSelected(int id) => _selectedTrackIds.contains(id);
+  Set<int> get selectedTrackIds => library.selectedView;
+  bool get selectionMode => library.selectionMode;
+  bool isTrackSelected(int id) => library.isSelected(id);
   TagFilter get tagFilter => tags.tagFilter;
   String get advancedFilter => tags.advancedFilter;
   bool get hasAdvancedFilter => tags.hasAdvancedFilter;
@@ -351,7 +334,25 @@ class AppState extends ChangeNotifier {
       downloader: dlsiteCoverDownloader,
       onRefresh: refresh,
     )..addListener(notifyListeners);
+    // 作品库只通知界面重画；跨对象协作（封面、元数据、标签）留在 AppState。
+    library = LibraryState(
+      trackDao: () => _trackDao,
+      workDao: () => _workDao,
+      folderDao: () => _folderDao,
+      mediaDao: () => _mediaDao,
+      tagDao: () => _tagDao,
+      hasAdvancedFilter: () => hasAdvancedFilter,
+      tagFilter: () => tags.tagFilter,
+      matchingIds: _computeMatchingIds,
+      filterFolders: (folders, ids) =>
+          _filterFolders(folders, ids, MediaType.audio),
+      sortTracks: _sortTracks,
+      onBeforeRefresh: _subtitleCache.clear,
+    )..addListener(notifyListeners);
   }
+
+  /// 作品库状态：作品集、导航、中间栏内容、搜索与曲目多选。
+  late final LibraryState library;
 
   /// 封面相关状态：卷封面、播放来源封面、缓存上限与驱逐。
   late final CoverState covers;
@@ -516,7 +517,7 @@ class AppState extends ChangeNotifier {
 
   /// 当前浏览上下文的库标识：`audio` / `media`，没有上下文时为 null。
   String? get currentLibrary =>
-      _currentWork?.library ?? _currentFolder?.library;
+      library.currentWork?.library ?? library.currentFolder?.library;
 
 
 
@@ -529,11 +530,11 @@ class AppState extends ChangeNotifier {
     final deleted = await _mediaDao.deleteByIds(list);
     for (final id in list) {
       tags.clearCaches();
-      _selectedTrackIds.remove(id);
+      library.selectedTrackIds.remove(id);
     }
-    if (_selectedTrackIds.isEmpty) _selectionMode = false;
-    if (_anchorTrackId != null && !_selectedTrackIds.contains(_anchorTrackId)) {
-      _anchorTrackId = null;
+    if (library.selectedTrackIds.isEmpty) library.selectionMode = false;
+    if (library.anchorTrackId != null && !library.selectedTrackIds.contains(library.anchorTrackId)) {
+      library.anchorTrackId = null;
     }
     _mediaRevision++;
     await refresh();
@@ -542,102 +543,12 @@ class AppState extends ChangeNotifier {
   }
 
 
-  // ═══════════════ 刷新 / 中间栏加载 ═══════════════
+  // ═══════════════ 刷新 / 中间栏加载（实现在 LibraryState）═══════════════
 
-  /// 每次 refresh 递增。用于丢弃「先发起但后完成」的旧结果。
-  int _refreshGeneration = 0;
+  Future<void> refresh() => library.refresh();
 
-  Future<void> refresh() async {
-    final gen = ++_refreshGeneration;
-    logInfo('AppState', 'refresh() gen=$gen');
-    _subtitleCache.clear();
-    final works = await _workDao.listAll();
-    final unassigned = await _folderDao.listUnassignedRoots();
-    if (gen != _refreshGeneration) {
-      logInfo('AppState', 'refresh() gen=$gen 已被新一代取代，丢弃结果');
-      return;
-    }
-    _works = works;
-    _unassignedFolders = unassigned;
-    notifyListeners();
-    await _loadCenter(gen);
-  }
-
-  /// 加载中间栏。[gen] 是发起时的 [refresh] 代际。
-  ///
-  /// 应用只剩音频库，中间栏只填曲目与文件夹。
-  Future<void> _loadCenter(int gen) async {
-    _loading = true;
-    notifyListeners();
-    try {
-      final search = _searchQuery.trim();
-      final filterActive = hasAdvancedFilter || tags.tagFilter.active;
-
-      List<VirtualFolder> folders;
-      List<TrackItem> tracks;
-
-      if (search.isNotEmpty) {
-        folders = const [];
-        var list = await _trackDao.searchByName(search);
-        if (filterActive) {
-          final ids = await _computeMatchingIds(MediaType.audio);
-          list = list.where((t) => ids.contains(t.id)).toList();
-        }
-        tracks = list;
-      } else {
-        if (_currentWork != null && _currentFolderId != null) {
-          folders = await _folderDao.listChildren(_currentFolderId!);
-          tracks = _currentFolderPath == null
-              ? <TrackItem>[]
-              : await _trackDao.queryDirectInDir(_currentFolderPath!);
-        } else if (_currentWork != null) {
-          // 作品层保留入口文件夹，它是进入专辑/歌单的入口。
-          folders = await _folderDao.listRootsByWork(_currentWork!.id!);
-          tracks = const [];
-        } else {
-          folders = const [];
-          tracks = const [];
-        }
-
-        if (filterActive) {
-          final ids = await _computeMatchingIds(MediaType.audio);
-          tracks = tracks.where((t) => ids.contains(t.id)).toList();
-          folders =
-              await _filterFolders(folders, ids, MediaType.audio);
-        }
-      }
-
-      // 等待期间又有新的 refresh 发起，本次结果作废，不覆盖更新的状态。
-      if (gen != _refreshGeneration) {
-        logInfo('AppState', 'Center load gen=$gen 已被取代，丢弃结果');
-        return;
-      }
-      _centerFolders = _sortFolders(folders);
-      _tracks = _sortTracks(tracks);
-      // 选中集合只保留当前可见的条目。切到别的作品或文件夹之后，
-      // 「批量打标签」「移动」不会落到看不见的条目上。
-      final visibleTrackIds = _tracks.map((t) => t.id).whereType<int>().toSet();
-      final selectedBefore = _selectedTrackIds.length;
-      _selectedTrackIds.retainAll(visibleTrackIds);
-      if (_anchorTrackId != null && !visibleTrackIds.contains(_anchorTrackId)) {
-        _anchorTrackId = null;
-      }
-      if (_selectedTrackIds.isEmpty) _selectionMode = false;
-      if (selectedBefore != _selectedTrackIds.length) {
-        logInfo('AppState',
-            '选中集合随上下文收窄: $selectedBefore -> ${_selectedTrackIds.length}');
-      }
-
-      logInfo('AppState',
-          'Center loaded: ${_centerFolders.length} folders, ${_tracks.length} tracks');
-    } finally {
-      // 只有最新一代有资格清 loading，否则会提前关掉新一轮的转圈。
-      if (gen == _refreshGeneration) {
-        _loading = false;
-        notifyListeners();
-      }
-    }
-  }
+  /// 目录结构变了，界面据此重查文件夹树。
+  void _bumpFolderVersion() => library.bumpFolderVersion();
 
   /// 当前筛选下命中的媒体 id 集合。[type] 是当前库的媒体类型：音频库用
   /// `MediaType.audio`，多媒体库传 null（不限类型）。
@@ -727,14 +638,6 @@ class AppState extends ChangeNotifier {
     return false;
   }
 
-  List<VirtualFolder> _sortFolders(List<VirtualFolder> list) {
-    // 先复制：入参可能是 const []（不可变），直接 sort 会抛 Unsupported operation
-    final sorted = List<VirtualFolder>.from(list);
-    // 自然序：第 2 卷排在第 10 卷前面（BUILD_GUIDE 第 20.2 节）
-    sorted.sort((a, b) => naturalCompare(a.name, b.name));
-    return sorted;
-  }
-
   /// 图片/视频按当前视觉库的排序方式排；默认 `name` 是自然序，
   /// 与 [MediaDao.naturalOrderBy] 的 SQL 顺序一致（BUILD_GUIDE 第 20.2 节）。
   List<MediaItem> _sortImages(List<MediaItem> list) {
@@ -773,68 +676,57 @@ class AppState extends ChangeNotifier {
   // ═══════════════ 搜索 ═══════════════
 
   void setSearchQuery(String q) {
-    _searchQuery = q;
+    library.applySearch(q);
     refresh();
   }
 
   // ═══════════════ 导航 ═══════════════
 
   Future<void> goHome() async {
-    _currentWork = null;
-    _currentFolderId = null;
-    _currentFolder = null;
-    _currentFolderPath = null;
-    _breadcrumb = [];
+    library.resetToHome();
     await refresh();
   }
 
   Future<void> enterWork(int workId) async {
     final work = await _workDao.getById(workId);
     if (work == null) return;
-    _currentWork = work;
-    _currentFolderId = null;
-    _currentFolder = null;
-    _currentFolderPath = null;
-    _breadcrumb = [
-      _rootCrumb,
-      VirtualFolder(id: -1, name: work.name, workId: work.id),
-    ];
+    library.showWork(work);
     // 自动封面指向的原图可能被删了，进来时顺手改选当前第一张。
     await _autoAssignWorkCover(workId);
     // 元数据先装进内存，详情头同步读，省一次闪烁。
     await dlsite.prefetch(workId);
-    _currentWork = await _workDao.getById(workId) ?? work;
+    library.setCurrentWork(await _workDao.getById(workId) ?? work);
     await refresh();
   }
 
   Future<void> enterFolder(int folderId) async {
     final folder = await _folderDao.getById(folderId);
     if (folder == null) return;
-    _currentFolderId = folderId;
-    _currentFolder = folder;
     final paths = await _folderDao.getPaths(folderId);
-    _currentFolderPath = paths.isEmpty ? null : paths.first.path;
+    library.showFolder(folder, path: paths.isEmpty ? null : paths.first.path);
     // 若文件夹属于某作品，确保 currentWork 一致
-    if (folder.workId != null && _currentWork?.id != folder.workId) {
+    final work = library.currentWork;
+    if (folder.workId != null && work?.id != folder.workId) {
       final w = await _workDao.getById(folder.workId!);
-      if (w != null) _currentWork = w;
+      if (w != null) library.setCurrentWork(w);
     }
-    _breadcrumb = await _buildBreadcrumb();
+    library.breadcrumb = await library.buildBreadcrumb();
     await refresh();
   }
 
   Future<void> goUp() async {
-    if (_currentFolderId == null) {
+    if (library.currentFolderId == null) {
       // 作品层再往上就是全部作品。以前的实现是重新进入同一部作品，
       // 按返回箭头等于原地刷新。
       await goHome();
       return;
     }
-    final parent = _currentFolder?.parentId;
+    final parent = library.currentFolder?.parentId;
     if (parent == null) {
       // 回到作品层
-      if (_currentWork != null) {
-        await enterWork(_currentWork!.id!);
+      final work = library.currentWork;
+      if (work != null) {
+        await enterWork(work.id!);
       } else {
         await goHome();
       }
@@ -844,37 +736,13 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> enterWorkOrHome() async {
-    if (_currentWork != null) {
-      await enterWork(_currentWork!.id!);
+    final work = library.currentWork;
+    if (work != null) {
+      await enterWork(work.id!);
     } else {
       await goHome();
     }
   }
-
-  Future<List<VirtualFolder>> _buildBreadcrumb() async {
-    final work = _currentWork;
-    final chain = <VirtualFolder>[];
-    var cur = _currentFolder;
-    while (cur != null) {
-      chain.insert(0, cur);
-      if (cur.parentId == null) break;
-      cur = await _folderDao.getById(cur.parentId!);
-    }
-    // work 作为首层标记
-    if (work != null) {
-      chain.insert(
-          0,
-          VirtualFolder(
-              id: -1, name: work.name, parentId: null, workId: work.id));
-    }
-    // 链首固定是全部作品。没有作品归属的文件夹也走这里，不再缺根节点。
-    chain.insert(0, _rootCrumb);
-    return chain;
-  }
-
-  /// 面包屑的根节点。id 用 -2，与作品标记 -1 区分，不落库。
-  static const VirtualFolder _rootCrumb =
-      VirtualFolder(id: -2, name: '全部作品', library: 'audio');
 
   // ═══════════════ 作品集操作 ═══════════════
 
@@ -886,12 +754,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> renameWork(int id, String name) async {
     await _workDao.rename(id, name);
-    if (_currentWork?.id == id) {
-      _currentWork = Work(
+    if (library.currentWork?.id == id) {
+      library.currentWork = Work(
           id: id,
           name: name,
-          coverPath: _currentWork!.coverPath,
-          createdAt: _currentWork!.createdAt);
+          coverPath: library.currentWork!.coverPath,
+          createdAt: library.currentWork!.createdAt);
     }
     await refresh();
   }
@@ -899,7 +767,7 @@ class AppState extends ChangeNotifier {
   Future<void> deleteWork(int id) async {
     // WorkDao.delete 内部用事务完成「摘归属 + 删作品」。
     await _workDao.delete(id);
-    if (_currentWork?.id == id) {
+    if (library.currentWork?.id == id) {
       await goHome();
     } else {
       await refresh();
@@ -908,12 +776,12 @@ class AppState extends ChangeNotifier {
 
   Future<void> setWorkCover(int id, String? coverPath) async {
     await _workDao.setCover(id, coverPath);
-    if (_currentWork?.id == id) {
-      _currentWork = Work(
+    if (library.currentWork?.id == id) {
+      library.currentWork = Work(
           id: id,
-          name: _currentWork!.name,
+          name: library.currentWork!.name,
           coverPath: coverPath,
-          createdAt: _currentWork!.createdAt);
+          createdAt: library.currentWork!.createdAt);
     }
     notifyListeners();
     await refresh();
@@ -923,7 +791,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> renameFolder(int id, String newName) async {
     await _folderDao.rename(id, newName);
-    _folderVersion++;
+    _bumpFolderVersion();
     await refresh();
   }
 
@@ -934,11 +802,11 @@ class AppState extends ChangeNotifier {
         (await _folderDao.getPaths(id)).map((fp) => fp.path).toList();
     await _folderDao.delete(id);
     await _pruneTracksLeftBehind(removedPaths);
-    _folderVersion++;
-    if (_currentFolderId == id) {
-      _currentFolderId = null;
-      _currentFolder = null;
-      _currentFolderPath = null;
+    _bumpFolderVersion();
+    if (library.currentFolderId == id) {
+      library.currentFolderId = null;
+      library.currentFolder = null;
+      library.currentFolderPath = null;
     }
     await refresh();
   }
@@ -985,11 +853,11 @@ class AppState extends ChangeNotifier {
   Future<int> deleteFolderDeep(int id) async {
     final ids = await _expandFoldersDeep(<int>{id});
     final deleted = await _deleteFoldersDeep(ids);
-    _folderVersion++;
-    if (_currentFolderId != null && ids.contains(_currentFolderId)) {
-      _currentFolderId = null;
-      _currentFolder = null;
-      _currentFolderPath = null;
+    _bumpFolderVersion();
+    if (library.currentFolderId != null && ids.contains(library.currentFolderId)) {
+      library.currentFolderId = null;
+      library.currentFolder = null;
+      library.currentFolderPath = null;
     }
     await refresh();
     return deleted;
@@ -1005,8 +873,8 @@ class AppState extends ChangeNotifier {
     final deleted = await _deleteFoldersDeep(ids);
     // 文件夹已删，这里只剩摘掉已不存在的归属并删除作品行。
     await _workDao.delete(workId);
-    _folderVersion++;
-    if (_currentWork?.id == workId) {
+    _bumpFolderVersion();
+    if (library.currentWork?.id == workId) {
       await goHome();
     } else {
       await refresh();
@@ -1178,7 +1046,7 @@ class AppState extends ChangeNotifier {
   Future<void> moveFolderToWork(int folderId, int? workId) async {
     final ids = await _folderDao.collectDescendants(folderId);
     await _folderDao.setWorkMany(ids, workId);
-    _folderVersion++;
+    _bumpFolderVersion();
     await refresh();
   }
 
@@ -1320,13 +1188,13 @@ class AppState extends ChangeNotifier {
           name: _baseName(dirPath), workId: workId, library: library);
       if (imported > 0) await _autoAssignWorkCover(workId);
       logInfo('AppState',
-          '$library 导入落库 $imported 条（扫描 ${paths.length} 条）: $dirPath');
+          '导入落库 $imported 条（扫描 ${paths.length} 条）: $dirPath');
     } catch (e) {
       importState.fail(e);
-      logError('AppState', '$library 导入失败', e.toString());
+      logError('AppState', '导入失败', e.toString());
     } finally {
       importState.reportProgress(imported > 0 ? 1.0 : 0.0);
-      _folderVersion++;
+      _bumpFolderVersion();
       await refresh();
     }
     // README 承诺「缩略图进库时后台补齐」：这里接着补，不占导入的关键路径。
@@ -1354,7 +1222,7 @@ class AppState extends ChangeNotifier {
       // 这里不能 refresh()：启动补齐是后台任务，refresh 会按当时的分区状态
       // 重写列表，和用户立刻发起的导航抢写。只把作品列表的封面换掉。
       if (changed > 0) {
-        _works = await _workDao.listAll();
+        library.works = await _workDao.listAll();
         notifyListeners();
       }
       logInfo('AppState', '存量作品默认封面补齐完成（${works.length} 个）');
@@ -1629,7 +1497,7 @@ class AppState extends ChangeNotifier {
       logError('AppState', '导入失败', e.toString());
     } finally {
       notifyListeners();
-      _folderVersion++;
+      _bumpFolderVersion();
       await refresh();
       await enforceCoverCacheLimit();
     }
@@ -1955,65 +1823,20 @@ class AppState extends ChangeNotifier {
 
   // ═══════════════ 曲目多选 + 批量标签 ═══════════════
 
-  void toggleTrackSelect(int id) {
-    if (_selectedTrackIds.contains(id)) {
-      _selectedTrackIds.remove(id);
-    } else {
-      _selectedTrackIds.add(id);
-    }
-    _anchorTrackId = id;
-    notifyListeners();
-  }
+  void toggleTrackSelect(int id) => library.toggleSelect(id);
 
-  void rangeTrackSelect(int id) {
-    final list = _tracks;
-    final anchorIdx = _anchorTrackId == null
-        ? -1
-        : list.indexWhere((t) => t.id == _anchorTrackId);
-    final curIdx = list.indexWhere((t) => t.id == id);
-    if (anchorIdx < 0 || curIdx < 0) {
-      toggleTrackSelect(id);
-      return;
-    }
-    final lo = anchorIdx < curIdx ? anchorIdx : curIdx;
-    final hi = anchorIdx < curIdx ? curIdx : anchorIdx;
-    for (final t in list.sublist(lo, hi + 1)) {
-      if (t.id != null) _selectedTrackIds.add(t.id!);
-    }
-    _anchorTrackId = id;
-    notifyListeners();
-  }
+  void rangeTrackSelect(int id) => library.rangeSelect(id);
 
   /// 长按进入多选模式（移动端）；桌面 Ctrl+点击也可走此路径
-  void enterSelectionMode(int id) {
-    _selectionMode = true;
-    _selectedTrackIds.add(id);
-    _anchorTrackId = id;
-    notifyListeners();
-  }
+  void enterSelectionMode(int id) => library.enterSelection(id);
 
-  void clearTrackSelection() {
-    _selectionMode = false;
-    _selectedTrackIds.clear();
-    _anchorTrackId = null;
-    notifyListeners();
-  }
+  void clearTrackSelection() => library.clearSelection();
 
   /// 只开多选模式，不预先选中任何曲目（工具条的「选择」按钮走这条路）
-  void enterTrackSelectionMode() {
-    _selectionMode = true;
-    notifyListeners();
-  }
+  void enterTrackSelectionMode() => library.enterSelectionMode();
 
   /// 选中当前列表里的全部曲目（多选工具条的「全选」）
-  void selectAllTracks() {
-    _selectionMode = true;
-    _selectedTrackIds
-      ..clear()
-      ..addAll(_tracks.map((t) => t.id).whereType<int>());
-    _anchorTrackId = _tracks.isEmpty ? null : _tracks.first.id;
-    notifyListeners();
-  }
+  void selectAllTracks() => library.selectAll();
 
   // ═══════════════ 播放 ═══════════════
 
@@ -2024,9 +1847,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> playAllCurrent() async {
-    if (_tracks.isEmpty) return;
+    if (library.tracks.isEmpty) return;
     _rememberQueueCover();
-    await player.playQueue(_tracks, startIndex: 0);
+    await player.playQueue(library.tracks, startIndex: 0);
   }
 
   /// 播放某个文件夹（含子文件夹）下的全部曲目
@@ -2230,9 +2053,9 @@ class AppState extends ChangeNotifier {
       player.seek(Duration(milliseconds: seg.startMs));
 
   Future<void> playTrackAt(int index) async {
-    if (index < 0 || index >= _tracks.length) return;
+    if (index < 0 || index >= library.tracks.length) return;
     _rememberQueueCover();
-    await player.playQueue(_tracks, startIndex: index);
+    await player.playQueue(library.tracks, startIndex: index);
   }
 
   // ═══════════════ 字幕 / 封面 ═══════════════
@@ -2252,7 +2075,7 @@ class AppState extends ChangeNotifier {
     await _trackDao.setSubtitlePath(trackId, newPath);
     _subtitleCache.clear();
     // 更新内存中的曲目
-    _tracks = _tracks
+    library.tracks = library.tracks
         .map((t) => t.id == trackId
             ? t.copyWith(subtitlePath: newPath)
             : t)
@@ -2263,7 +2086,7 @@ class AppState extends ChangeNotifier {
   Future<void> clearSubtitle(int trackId) async {
     await _trackDao.setSubtitlePath(trackId, null);
     _subtitleCache.clear();
-    _tracks = _tracks
+    library.tracks = library.tracks
         .map((t) => t.id == trackId ? t.copyWith(subtitlePath: null) : t)
         .toList();
     notifyListeners();
@@ -2293,7 +2116,7 @@ class AppState extends ChangeNotifier {
   String? coverForMedia(MediaItem item) {
     final own = item.coverPath;
     if (own != null && own.isNotEmpty) return own;
-    final workCover = _currentWork?.coverPath;
+    final workCover = library.currentWork?.coverPath;
     if (workCover != null && workCover.isNotEmpty) return workCover;
     return null;
   }
@@ -2303,7 +2126,7 @@ class AppState extends ChangeNotifier {
 
   /// 记下这次播放队列对应的作品封面。
   void _rememberQueueCover() {
-    covers.rememberQueueCover(_currentWork?.coverPath);
+    covers.rememberQueueCover(library.currentWork?.coverPath);
   }
 
   /// 按当前浏览的作品记录播放队列来源封面。
@@ -2335,7 +2158,7 @@ class AppState extends ChangeNotifier {
     try {
       // 关库前先前进一代：在途的 refresh 拿到结果后发现代际不匹配会主动丢弃，
       // 不会去写已经关掉的连接。
-      _refreshGeneration++;
+      library.invalidatePendingRefresh();
       await DatabaseManager.instance.close();
       final newD = await DataDirService.instance.migrateTo(newDir);
       // 日志跟着数据目录走，否则迁移后还往旧目录写。
@@ -2434,7 +2257,7 @@ class AppState extends ChangeNotifier {
   void _applyPlayPosition(int mediaId, int positionMs) {
     var changed = false;
     final next = <TrackItem>[];
-    for (final track in _tracks) {
+    for (final track in library.tracks) {
       if (track.id == mediaId && track.playPositionMs != positionMs) {
         changed = true;
         next.add(track.copyWith(playPositionMs: positionMs));
@@ -2443,7 +2266,7 @@ class AppState extends ChangeNotifier {
       }
     }
     if (!changed) return;
-    _tracks = next;
+    library.tracks = next;
     notifyListeners();
   }
 
@@ -2486,7 +2309,7 @@ class AppState extends ChangeNotifier {
     final keep = <String>{};
     final playing = player.currentTrack?.coverPath;
     if (playing != null) keep.add(playing);
-    final work = _currentWork?.coverPath;
+    final work = library.currentWork?.coverPath;
     if (work != null) keep.add(work);
     return keep;
   }
