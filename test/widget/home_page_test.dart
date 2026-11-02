@@ -266,4 +266,127 @@ void main() {
     expect(app.worksSortDescending, isFalse);
     expect(dx(aId), lessThan(dx(zId)), reason: '名称升序把 A卷 排到 Z卷 前');
   });
+
+  testWidgets('宽屏左栏默认 260，分隔条可以拖宽并落盘', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+
+    expect(app.leftWidth, 260);
+    expect(find.byKey(const ValueKey('split-left-panel')), findsOneWidget);
+    expect(
+        tester.getSize(find.byType(TagPanel)).width, closeTo(260, 0.5));
+
+    await tester.drag(
+        find.byKey(const ValueKey('split-left-panel')), const Offset(80, 0));
+    await settleIo(tester);
+
+    expect(app.leftWidth, greaterThan(260),
+        reason: '拖动结束后才把宽度写进设置');
+    expect(app.leftWidth, lessThanOrEqualTo(420));
+    expect(tester.getSize(find.byType(TagPanel)).width,
+        closeTo(app.leftWidth, 0.5));
+  });
+
+  testWidgets('左栏拖不过上限 420，双击恢复默认', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+
+    await tester.drag(find.byKey(const ValueKey('split-left-panel')),
+        const Offset(2000, 0));
+    await settleIo(tester);
+    expect(app.leftWidth, 420, reason: '上限是 420，不是窗口宽');
+
+    await tester.tap(find.byKey(const ValueKey('split-left-panel')));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tap(find.byKey(const ValueKey('split-left-panel')));
+    await settleIo(tester);
+    expect(app.leftWidth, 260);
+  });
+
+  testWidgets('窗口变窄时左栏只收缩显示，不回写设置', (tester) async {
+    wideScreen(tester);
+    await tester.runAsync(() => app.setLeftWidth(420));
+    await pumpHome(tester);
+    expect(tester.getSize(find.byType(TagPanel)).width, closeTo(420, 0.5));
+
+    tester.view.physicalSize = const Size(800, 1200);
+    await tester.pump();
+    await settleIo(tester);
+
+    expect(app.leftWidth, 420, reason: '窗口缩放不改用户设置');
+    expect(tester.getSize(find.byType(TagPanel)).width, lessThan(420),
+        reason: '中间至少留 420 像素');
+  });
+
+  testWidgets('窄屏没有分隔条', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await pumpHome(tester);
+
+    expect(find.byKey(const ValueKey('split-left-panel')), findsNothing);
+    expect(find.byKey(const ValueKey('split-library-tags')), findsNothing);
+  });
+
+  testWidgets('作品集高度默认 200，可拖高且不超过上限', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+    expect(app.libraryHeight, 200);
+
+    await tester.drag(
+        find.byKey(const ValueKey('split-library-tags')), const Offset(0, 60));
+    await settleIo(tester);
+    expect(app.libraryHeight, greaterThan(200));
+
+    await tester.drag(find.byKey(const ValueKey('split-library-tags')),
+        const Offset(0, 2000));
+    await settleIo(tester);
+    expect(app.libraryHeight, lessThanOrEqualTo(480));
+    expect(tester.takeException(), isNull, reason: '标签区不能被作品集挤没');
+  });
+
+  testWidgets('面包屑最上级是全部作品，点它回到作品网格', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+    await tester.tap(find.byKey(ValueKey('work-card-$audioWorkId')));
+    await settleIo(tester);
+
+    expect(app.currentWork?.id, audioWorkId);
+    final rootCrumb = find.descendant(
+        of: find.byType(FolderBrowser), matching: find.text('全部作品'));
+    expect(rootCrumb, findsOneWidget);
+    expect(app.breadcrumb.first.id, -2, reason: '面包屑最上级是全部作品');
+
+    await tester.tap(rootCrumb);
+    await settleIo(tester);
+
+    expect(app.currentWork, isNull);
+    expect(find.byType(WorksGrid), findsOneWidget);
+  });
+
+  testWidgets('作品层返回键回到全部作品，不原地刷新', (tester) async {
+    wideScreen(tester);
+    await pumpHome(tester);
+    await tester.runAsync(() => app.enterWork(audioWorkId));
+    await settleIo(tester);
+    expect(app.currentWork, isNotNull);
+
+    await tester.runAsync(() => app.goUp());
+    await settleIo(tester);
+
+    expect(app.currentWork, isNull);
+    expect(find.byType(WorksGrid), findsOneWidget);
+  });
+
+  testWidgets('窗口很矮时布局不溢出，标签区仍在', (tester) async {
+    tester.view.physicalSize = const Size(1000, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await pumpHome(tester);
+
+    expect(find.byKey(const ValueKey('split-library-tags')), findsNothing,
+        reason: '放不下就折叠作品集，先保住标签区');
+    expect(find.text('标签'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
 }

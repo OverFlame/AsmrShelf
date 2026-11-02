@@ -132,6 +132,17 @@ class AppState extends ChangeNotifier {
   int _gridColumns = 4;
   int get gridColumns => _gridColumns;
 
+  // ── 界面布局 ──
+  double _leftWidth = SettingsService.defaultLeftWidth;
+
+  /// 宽屏左栏宽度。界面层还会按窗口宽度再夹一次，这里只保证落在设置允许的范围内。
+  double get leftWidth => _leftWidth;
+
+  double _libraryHeight = SettingsService.defaultLibraryHeight;
+
+  /// 左栏里作品集列表的高度。标签区占剩余空间。
+  double get libraryHeight => _libraryHeight;
+
   /// 缩略图缓存上限（MB）。复用封面缓存设置键，见 [setCacheSizeMB]。
   int get cacheSizeMB => _coverCacheLimitMB;
 
@@ -478,6 +489,8 @@ class AppState extends ChangeNotifier {
       _worksSortKey = ss.worksSortKey;
       _worksSortDesc = ss.worksSortDescending;
       _gridColumns = ss.gridColumns;
+      _leftWidth = ss.leftWidth;
+      _libraryHeight = ss.libraryHeight;
       _viewMode = ss.viewMode;
       _subtitleOpacityAuto = ss.subtitleOpacityAuto;
       _subtitleInactiveOpacity = ss.subtitleInactiveOpacity;
@@ -549,6 +562,31 @@ class AppState extends ChangeNotifier {
   Future<void> setGridColumns(int cols) async {
     _gridColumns = cols.clamp(2, 10);
     await SettingsService.instance.setGridColumns(_gridColumns);
+    notifyListeners();
+  }
+
+  // ── 界面布局 ──
+
+  Future<void> setLeftWidth(double width) async {
+    _leftWidth = width.clamp(
+        SettingsService.minLeftWidth, SettingsService.maxLeftWidth);
+    await SettingsService.instance.setLeftWidth(_leftWidth);
+    notifyListeners();
+  }
+
+  Future<void> setLibraryHeight(double height) async {
+    _libraryHeight = height.clamp(
+        SettingsService.minLibraryHeight, SettingsService.maxLibraryHeight);
+    await SettingsService.instance.setLibraryHeight(_libraryHeight);
+    notifyListeners();
+  }
+
+  /// 恢复默认布局。只动两个尺寸，不碰主题、列数、排序与筛选。
+  Future<void> resetLayoutSizes() async {
+    _leftWidth = SettingsService.defaultLeftWidth;
+    _libraryHeight = SettingsService.defaultLibraryHeight;
+    await SettingsService.instance.setLeftWidth(_leftWidth);
+    await SettingsService.instance.setLibraryHeight(_libraryHeight);
     notifyListeners();
   }
 
@@ -876,7 +914,10 @@ class AppState extends ChangeNotifier {
     _currentFolderId = null;
     _currentFolder = null;
     _currentFolderPath = null;
-    _breadcrumb = [VirtualFolder(id: -1, name: work.name, workId: work.id)];
+    _breadcrumb = [
+      _rootCrumb,
+      VirtualFolder(id: -1, name: work.name, workId: work.id),
+    ];
     // 自动封面指向的原图可能被删了，进来时顺手改选当前第一张。
     await _autoAssignWorkCover(workId);
     _currentWork = await _workDao.getById(workId) ?? work;
@@ -901,7 +942,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> goUp() async {
     if (_currentFolderId == null) {
-      await enterWorkOrHome();
+      // 作品层再往上就是全部作品。以前的实现是重新进入同一部作品，
+      // 按返回箭头等于原地刷新。
+      await goHome();
       return;
     }
     final parent = _currentFolder?.parentId;
@@ -941,8 +984,14 @@ class AppState extends ChangeNotifier {
           VirtualFolder(
               id: -1, name: work.name, parentId: null, workId: work.id));
     }
+    // 链首固定是全部作品。没有作品归属的文件夹也走这里，不再缺根节点。
+    chain.insert(0, _rootCrumb);
     return chain;
   }
+
+  /// 面包屑的根节点。id 用 -2，与作品标记 -1 区分，不落库。
+  static const VirtualFolder _rootCrumb =
+      VirtualFolder(id: -2, name: '全部作品', library: 'audio');
 
   // ═══════════════ 作品集操作 ═══════════════
 

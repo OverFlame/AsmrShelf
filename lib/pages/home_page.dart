@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/import_scanner.dart';
+import '../services/settings_service.dart';
 import '../services/thumbnail_cache.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
@@ -10,6 +13,7 @@ import '../widgets/dialogs.dart' show confirmDialog, pickDirectory;
 import '../widgets/filter_dialog.dart';
 import '../widgets/folder_browser.dart';
 import '../widgets/player_bar.dart';
+import '../widgets/split_handle.dart';
 import '../widgets/tag_panel.dart';
 import '../widgets/thumb_backfill_chip.dart';
 import '../widgets/works_grid.dart';
@@ -30,6 +34,35 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  /// 左栏宽度的当前显示值。拖动时只改这个，松手才写进设置。
+  final ValueNotifier<double> _leftWidth =
+      ValueNotifier<double>(SettingsService.defaultLeftWidth);
+  AppState? _appState;
+  bool _draggingLeft = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _appState = context.read<AppState>();
+    _leftWidth.value = _appState!.leftWidth;
+    _appState!.addListener(_syncLeftWidth);
+  }
+
+  @override
+  void dispose() {
+    _appState?.removeListener(_syncLeftWidth);
+    _leftWidth.dispose();
+    super.dispose();
+  }
+
+  /// 设置页改了尺寸或点了重置时，把新值同步过来。拖动中不覆盖用户手上的值。
+  void _syncLeftWidth() {
+    if (_draggingLeft) return;
+    final width = _appState?.leftWidth;
+    if (width != null && width != _leftWidth.value) {
+      _leftWidth.value = width;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,19 +96,7 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
           drawer: isWide ? null : _buildDrawer(),
-          body: isWide
-              ? Row(
-                  children: [
-                    Container(
-                      width: 260,
-                      color: AppColors.panelOf(context),
-                      child: _buildLeftPanel(),
-                    ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: _buildCenter(appState, isWide)),
-                  ],
-                )
-              : _buildCenter(appState, isWide),
+          body: isWide ? _buildWideBody(appState) : _buildCenter(appState, isWide),
           bottomNavigationBar: const PlayerBar(),
         ),
         if (appState.backfillingThumbs)
@@ -86,6 +107,63 @@ class _HomePageState extends State<HomePage> {
           ),
       ],
     );
+  }
+
+  /// 宽屏布局：左栏宽度可拖，中间内容吃掉剩余空间。
+  Widget _buildWideBody(AppState appState) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 中间至少留 MIN_CENTER_WIDTH 像素，左栏本身不小于最小宽度。
+        final maxLeft = _maxLeftWidth(constraints.maxWidth);
+        return ValueListenableBuilder<double>(
+          valueListenable: _leftWidth,
+          builder: (context, stored, center) {
+            final width = stored.clamp(
+                SettingsService.minLeftWidth, maxLeft);
+            return Row(
+              children: [
+                SizedBox(
+                  width: width,
+                  child: Container(
+                    color: AppColors.panelOf(context),
+                    child: _buildLeftPanel(),
+                  ),
+                ),
+                SplitHandle(
+                  key: const ValueKey('split-left-panel'),
+                  axis: Axis.horizontal,
+                  onDragDelta: (delta) {
+                    _draggingLeft = true;
+                    _leftWidth.value = (_leftWidth.value + delta)
+                        .clamp(SettingsService.minLeftWidth, maxLeft);
+                  },
+                  onDragEnd: () {
+                    _draggingLeft = false;
+                    appState.setLeftWidth(_leftWidth.value);
+                  },
+                  onReset: () {
+                    _leftWidth.value = SettingsService.defaultLeftWidth;
+                    appState.setLeftWidth(SettingsService.defaultLeftWidth);
+                  },
+                ),
+                Expanded(child: center!),
+              ],
+            );
+          },
+          child: _buildCenter(appState, true),
+        );
+      },
+    );
+  }
+
+  /// 左栏宽度的上限：不超过 420，也不让中间窄于 420。
+  double _maxLeftWidth(double totalWidth) {
+    const minCenterWidth = 420.0;
+    final byWindow = totalWidth - minCenterWidth - 8;
+    return math.max(
+        SettingsService.minLeftWidth,
+        math.min(
+            SettingsService.maxLeftWidth, byWindow));
   }
 
   // ── 左栏：标签面板 ──

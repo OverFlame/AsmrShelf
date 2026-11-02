@@ -38,6 +38,29 @@ class SettingsPage extends StatelessWidget {
           _viewModeTile(context, appState),
           const Divider(height: 1),
 
+          // ── 界面布局 ──
+          const _SectionHeader('界面布局'),
+          ListTile(
+            key: const ValueKey('reset-layout'),
+            leading: const Icon(Icons.dashboard_customize_outlined, size: 18),
+            title: const Text('恢复默认布局'),
+            subtitle: Text(
+              '左栏 ${appState.leftWidth.round()} 像素，作品集 ${appState.libraryHeight.round()} 像素；'
+              '恢复为 260 与 200。也可以双击分隔条。',
+              style: TextStyle(
+                  fontSize: 11, color: AppColors.textSecondaryOf(context)),
+            ),
+            trailing: const Icon(Icons.restart_alt, size: 18),
+            onTap: () async {
+              await appState.resetLayoutSizes();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('布局已恢复默认')));
+              }
+            },
+          ),
+          const Divider(height: 1),
+
           // ── 高级筛选 ──
           const _SectionHeader('高级筛选'),
           ListTile(

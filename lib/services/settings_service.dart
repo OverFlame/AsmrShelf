@@ -232,6 +232,43 @@ class SettingsService {
     await _save();
   }
 
+  // ── 界面布局 ──
+
+  /// 左栏宽度。默认 260，允许 200 至 420。
+  static const double defaultLeftWidth = 260;
+  static const double minLeftWidth = 200;
+  static const double maxLeftWidth = 420;
+
+  /// 作品集列表高度。默认 200，允许 140 至 480。
+  static const double defaultLibraryHeight = 200;
+  static const double minLibraryHeight = 140;
+  static const double maxLibraryHeight = 480;
+
+  double get leftWidth => _clampDouble(
+      _data['layout_left_width'], defaultLeftWidth, minLeftWidth, maxLeftWidth);
+
+  Future<void> setLeftWidth(double width) async {
+    _data['layout_left_width'] =
+        _clampDouble(width, defaultLeftWidth, minLeftWidth, maxLeftWidth);
+    await _save();
+  }
+
+  double get libraryHeight => _clampDouble(_data['layout_library_height'],
+      defaultLibraryHeight, minLibraryHeight, maxLibraryHeight);
+
+  Future<void> setLibraryHeight(double height) async {
+    _data['layout_library_height'] = _clampDouble(
+        height, defaultLibraryHeight, minLibraryHeight, maxLibraryHeight);
+    await _save();
+  }
+
+  /// 读配置时的统一夹取：键缺失、类型不对、值越界都退回合法范围。
+  double _clampDouble(Object? raw, double fallback, double min, double max) {
+    final value = raw is num ? raw.toDouble() : fallback;
+    if (value.isNaN) return fallback;
+    return value.clamp(min, max);
+  }
+
   /// 图片视图模式：grid / list，默认 grid
   String get viewMode => (_data['view_mode'] as String?) ?? 'grid';
 

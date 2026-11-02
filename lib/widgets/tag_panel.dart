@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../db/tag_dao.dart';
+import '../services/settings_service.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'controller_owner.dart';
 import 'dialogs.dart';
 import 'scan_access_snack.dart';
+import 'split_handle.dart';
 
 /// 左侧面板：导入 + 作品集 + 标签（对标 PictureViewer 的标签面板）
 class TagPanel extends StatefulWidget {
@@ -27,26 +29,109 @@ class _TagPanelState extends State<TagPanel> {
   final _tagSearchCtrl = TextEditingController();
   String _tagSearch = '';
 
+  /// 作品集列表的当前高度。拖动时只改这个，松手才写进设置。
+  final ValueNotifier<double> _libraryHeight =
+      ValueNotifier<double>(SettingsService.defaultLibraryHeight);
+  AppState? _appState;
+  bool _draggingLibrary = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _appState = context.read<AppState>();
+    _libraryHeight.value = _appState!.libraryHeight;
+    _appState!.addListener(_syncLibraryHeight);
+  }
+
   @override
   void dispose() {
+    _appState?.removeListener(_syncLibraryHeight);
+    _libraryHeight.dispose();
     _pathController.dispose();
     _tagSearchCtrl.dispose();
     super.dispose();
+  }
+
+  /// 设置页改了高度或点了重置时同步过来。拖动中不覆盖用户手上的值。
+  void _syncLibraryHeight() {
+    if (_draggingLibrary) return;
+    final height = _appState?.libraryHeight;
+    if (height != null && height != _libraryHeight.value) {
+      _libraryHeight.value = height;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final appState = context.watch<AppState>();
     if (widget.filterOnly) return _tagSection(appState);
-    return Column(
-      children: [
-        _importSection(appState),
-        const Divider(height: 1),
-        _librarySection(appState),
-        const Divider(height: 1),
-        Expanded(child: _tagSection(appState)),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 窗口被压到放不下「导入 + 作品集最小高 + 标签最小高」时，
+        // 折叠作品集先保住标签区：宁可少一块，不能整栏溢出。
+        if (constraints.maxHeight < _compactHeightThreshold) {
+          return Column(
+            children: [
+              _importSection(appState),
+              const Divider(height: 1),
+              Expanded(child: _tagSection(appState)),
+            ],
+          );
+        }
+        final maxHeight = _maxLibraryHeight(constraints.maxHeight);
+        return ValueListenableBuilder<double>(
+          valueListenable: _libraryHeight,
+          builder: (context, stored, _) {
+            final height = stored.clamp(
+                SettingsService.minLibraryHeight, maxHeight);
+            return Column(
+              children: [
+                _importSection(appState),
+                const Divider(height: 1),
+                _librarySection(appState, height),
+                SplitHandle(
+                  key: const ValueKey('split-library-tags'),
+                  axis: Axis.vertical,
+                  onDragDelta: (delta) {
+                    _draggingLibrary = true;
+                    _libraryHeight.value = (_libraryHeight.value + delta)
+                        .clamp(SettingsService.minLibraryHeight, maxHeight);
+                  },
+                  onDragEnd: () {
+                    _draggingLibrary = false;
+                    appState.setLibraryHeight(_libraryHeight.value);
+                  },
+                  onReset: () {
+                    _libraryHeight.value =
+                        SettingsService.defaultLibraryHeight;
+                    appState.setLibraryHeight(
+                        SettingsService.defaultLibraryHeight);
+                  },
+                ),
+                Expanded(child: _tagSection(appState)),
+              ],
+            );
+          },
+        );
+      },
     );
+  }
+
+  /// 低于这个高度就折叠作品集：导入区约 86、作品集最小 140、
+  /// 分隔条 8、标签区至少能滚动的最小高度，加起来约 320。
+  static const double _compactHeightThreshold = 340;
+
+  /// 作品集列表高度上限：不超过 480，也要给标签区留够 220，且最多占一半。
+  double _maxLibraryHeight(double panelHeight) {
+    const minTagHeight = 220.0;
+    final byPanel = panelHeight * 0.5;
+    final byTags = panelHeight - minTagHeight;
+    final limit = byPanel < byTags ? byPanel : byTags;
+    return limit < SettingsService.minLibraryHeight
+        ? SettingsService.minLibraryHeight
+        : (limit > SettingsService.maxLibraryHeight
+            ? SettingsService.maxLibraryHeight
+            : limit);
   }
 
   // ── 导入 ──
@@ -158,7 +243,7 @@ class _TagPanelState extends State<TagPanel> {
   }
 
   // ── 作品集 ──
-  Widget _librarySection(AppState appState) {
+  Widget _librarySection(AppState appState, double height) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -183,7 +268,7 @@ class _TagPanelState extends State<TagPanel> {
           ),
         ),
         SizedBox(
-          height: 200,
+          height: height,
           child: ListView(
             padding: const EdgeInsets.only(bottom: 4),
             children: [

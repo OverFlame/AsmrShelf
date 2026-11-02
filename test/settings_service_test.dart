@@ -120,4 +120,49 @@ void main() {
     await s.setPlaySpeed(0.1);
     expect(s.playSpeed, 0.5);
   });
+
+  test('布局尺寸：默认 260 与 200，越界值夹回范围内', () async {
+    final s = SettingsService.instance;
+    expect(s.leftWidth, SettingsService.defaultLeftWidth);
+    expect(s.libraryHeight, SettingsService.defaultLibraryHeight);
+
+    await s.setLeftWidth(50);
+    expect(s.leftWidth, SettingsService.minLeftWidth);
+    await s.setLeftWidth(9999);
+    expect(s.leftWidth, SettingsService.maxLeftWidth);
+
+    await s.setLibraryHeight(10);
+    expect(s.libraryHeight, SettingsService.minLibraryHeight);
+    await s.setLibraryHeight(10000);
+    expect(s.libraryHeight, SettingsService.maxLibraryHeight);
+  });
+
+  test('布局尺寸能写盘并读回', () async {
+    final s = SettingsService.instance;
+    await s.setLeftWidth(333);
+    await s.setLibraryHeight(275);
+
+    s.resetForTest();
+    await s.init();
+
+    expect(s.leftWidth, 333);
+    expect(s.libraryHeight, 275);
+  });
+
+  test('布局尺寸文件里是脏值时：非数字回默认，越界夹回范围内', () async {
+    await settingsFile.parent.create(recursive: true);
+    await settingsFile.writeAsString(jsonEncode({
+      'layout_left_width': 'wide',
+      'layout_library_height': -5,
+    }));
+
+    final s = SettingsService.instance;
+    s.resetForTest();
+    await s.init();
+
+    expect(s.leftWidth, SettingsService.defaultLeftWidth,
+        reason: '字符串读不出宽度，用默认值');
+    expect(s.libraryHeight, SettingsService.minLibraryHeight,
+        reason: '数值越界夹回最小，不把面板拖成负数');
+  });
 }
