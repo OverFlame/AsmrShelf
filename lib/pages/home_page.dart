@@ -356,6 +356,13 @@ class _VisualToolbar extends StatelessWidget {
                 ),
               if (!compact && appState.currentWork != null)
                 IconButton(
+                  key: ValueKey('audio-toolbar-find-cover'),
+                  tooltip: '从文件里找封面',
+                  icon: const Icon(Icons.image_search_outlined, size: 18),
+                  onPressed: () => _findLocalCover(context),
+                ),
+              if (!compact && appState.currentWork != null)
+                IconButton(
                   key: ValueKey('audio-toolbar-dlsite'),
                   tooltip: '抓取 DLsite 元数据',
                   icon: const Icon(Icons.cloud_download_outlined, size: 18),
@@ -470,6 +477,12 @@ class _VisualToolbar extends StatelessWidget {
                               style: TextStyle(fontSize: 13))),
                     if (appState.currentWork != null)
                       PopupMenuItem(
+                          key: ValueKey('audio-toolbar-find-cover'),
+                          value: 'findCover',
+                          child: const Text('从文件里找封面',
+                              style: TextStyle(fontSize: 13))),
+                    if (appState.currentWork != null)
+                      PopupMenuItem(
                           key: ValueKey('audio-toolbar-dlsite'),
                           value: 'dlsite',
                           child: const Text('抓取 DLsite 元数据',
@@ -512,6 +525,9 @@ class _VisualToolbar extends StatelessWidget {
       case 'addFolder':
         _addFolderToWork(context);
         break;
+      case 'findCover':
+        _findLocalCover(context);
+        break;
       case 'dlsite':
         _fetchDlsite(context);
         break;
@@ -538,6 +554,17 @@ class _VisualToolbar extends StatelessWidget {
   }
 
   /// 把磁盘上的一个文件夹补进当前作品：图片、视频、音频一次都收。
+  /// 从作品目录里挑一张图当封面并写盘。
+  Future<void> _findLocalCover(BuildContext context) async {
+    final appState = context.read<AppState>();
+    final workId = appState.currentWork?.id;
+    if (workId == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final message = await appState.findLocalCoverForWork(workId);
+    if (!context.mounted) return;
+    messenger.showSnackBar(SnackBar(content: Text(message ?? '封面已写入作品目录')));
+  }
+
   /// 按作品目录名里的编号抓一次 DLsite 元数据。
   ///
   /// 抓不到时把原因原样弹给用户（没有编号、被限制、网络不通），不做静默失败。

@@ -381,3 +381,22 @@ dart run tool/import_cli.dart --root <目录> [--db <库文件>] [--nested] [--d
 `Work` 模型补了 `rootPath` 字段（表里早就有 `root_path`，模型一直没读）。测试 `test/state/app_state_dlsite_test.dart` 3 例（从目录名取编号并落库+打标签、无编号不发请求、二次命中缓存）。
 
 验证：analyze 无问题、`flutter test` 591 例全过、`NO_XIPH_LIBS=1 flutter build linux --release` 成功。
+
+## 2026-11-02 从文件里找封面
+
+需求口径：刮削不到封面时从作品目录里找，`缩略图`、`特典` 这类文件夹里的图也算，名字不一定是「封面」；都找不到就取最靠近根目录的那张。找到后写成作品根目录下的封面文件。
+
+`AppState.findLocalCoverForWork(int workId)`：
+
+| 情况 | 结果 |
+|---|---|
+| 作品没有登记目录 | 返回「这部作品没有登记目录，找不了封面」 |
+| 已经有封面 | 返回「这部作品已经有封面了」，不动文件 |
+| 找到并写盘 | 写 `RJ294126_cover.<ext>`（无编号写 `cover.<ext>`），更新 `works.cover_path`，返回 null |
+| 一张图都没有 | 返回「这个目录里没找到能当封面的图片」 |
+
+界面在作品工具条加「从文件里找封面」按钮（`audio-toolbar-find-cover`，窄版进「更多」）。回退链与打分完全复用 `lib/services/cover_finder.dart` 与 `lib/services/cover_selector.dart`，界面层不重复实现。
+
+一个实测结论：导入阶段本来就会写封面（`PlanImporter` 用扫描计划的 `coverPath`），所以这个入口主要用于「导入时没图、后来补了图」或「封面记录被清掉」的情况。测试 `test/state/app_state_find_cover_test.dart` 3 例（信号目录挑图并写盘、已有封面不动、无图给提示）。
+
+验证：analyze 无问题、`flutter test` 594 例全过、Linux release 构建成功。

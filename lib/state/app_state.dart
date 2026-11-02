@@ -13,6 +13,7 @@ import '../db/tag_dao.dart';
 import '../db/track_dao.dart';
 import '../db/work_dao.dart';
 import '../db/work_metadata_dao.dart';
+import '../services/cover_finder.dart';
 import '../services/cover_service.dart';
 import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
@@ -1545,6 +1546,27 @@ class AppState extends ChangeNotifier {
   }
 
   /// 导入目录到指定作品（合并）
+  /// 从作品目录里挑一张图当封面，并把封面文件写进作品根目录。
+  ///
+  /// 回退链在 `lib/services/cover_finder.dart`：根目录白名单、信号目录、
+  /// 根目录任意图、整棵子树按打分。已经有封面的作品不动，返回提示。
+  Future<String?> findLocalCoverForWork(int workId) async {
+    final work = await _workDao.getById(workId);
+    final root = work?.rootPath;
+    if (root == null || root.trim().isEmpty) {
+      return '这部作品没有登记目录，找不了封面';
+    }
+    if (work!.coverPath != null && work.coverPath!.trim().isNotEmpty) {
+      return '这部作品已经有封面了';
+    }
+    final code = parseWorkCode(p.basename(root))?.code;
+    final written = await CoverFinder().fetchAndWrite(root, code: code);
+    if (written == null) return '这个目录里没找到能当封面的图片';
+    await _workDao.setCover(workId, written);
+    await refresh();
+    return null;
+  }
+
   /// 给一部作品抓 DLsite 元数据。
   ///
   /// 编号优先按作品目录名解析，目录名没有再看库里登记过的编号。抓不到时返回
