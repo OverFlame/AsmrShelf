@@ -191,3 +191,27 @@
 | `flutter analyze --no-fatal-infos` | 无问题 |
 | `flutter test` | 559 例全过 |
 | `NO_XIPH_LIBS=1 flutter build linux --release` | 成功 |
+
+## 2026-11-02 阶段四第二步：去掉多媒体栏的中间栏分支
+
+### 动作
+
+| 项 | 改动 |
+|---|---|
+| 中间栏 | `_loadCenter` 只留曲目与文件夹两条路，搜索与标签筛选都按 `MediaType.audio` 走 |
+| 状态 | 删 `_images`、`images`、`_setImages`、`_totalCount`、`totalCount`、`_imageIndex` |
+| 库判定 | 删 `_browsingLibrary`、`setBrowsingLibrary`、`_fillsImages`、`isImageLibrary`、`isVisualLibrary` |
+| 测试 | 删 `test/state/app_state_media_tab_test.dart`（多媒体栏已不存在） |
+
+`lib/state/app_state.dart` 再降到 2790 行上下。
+
+### 说明
+
+`_imageTags` 保留：它缓存的是媒体行标签，`tagsForMedia` 与曲目标签面板都在用，不是图片专用。`_mediaRevision` 保留：媒体行增删后界面靠它重查。
+
+### 验证
+
+| 项 | 结果 |
+|---|---|
+| `flutter analyze --no-fatal-infos` | 无问题 |
+| `flutter test` | 554 例全过 |

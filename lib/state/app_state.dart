@@ -85,34 +85,10 @@ class AppState extends ChangeNotifier {
   List<TrackItem> _tracks = [];
   List<TrackItem> get tracks => _tracks;
 
-  // ── 图片列表（与曲目列表按库类型互斥：同一时刻只有一侧有内容）──
-  List<MediaItem> _images = [];
-  List<MediaItem> get images => _images;
-
-  /// id → 图片的索引，跟着 [_images] 一起更新。
-  ///
-  /// 详情面板每次构建都会读 [selectedImage]；没有索引时要在整页列表上
-  /// 线性扫描，两万张图时每次通知都要扫一遍。
-  final Map<int, MediaItem> _imageIndex = {};
-
-
-  /// 统一替换图片列表并重建索引（不要直接给 [_images] 赋值）。
-  void _setImages(List<MediaItem> list) {
-    _images = list;
-    _imageIndex.clear();
-    for (final img in list) {
-      final id = img.id;
-      if (id != null) _imageIndex[id] = img;
-    }
-  }
-
-  /// 媒体行增删的代数：作品层的网格自己缓存媒体列表，删完记录要
-  /// 靠这个代数知道该重查，不然磁贴会留在界面上。
+  /// 媒体行增删的代数，界面据此知道该重查。
   int _mediaRevision = 0;
   int get mediaRevision => _mediaRevision;
 
-  int _totalCount = 0;
-  int get totalCount => _totalCount;
 
   bool _loading = false;
   bool get loading => _loading;
@@ -613,30 +589,6 @@ class AppState extends ChangeNotifier {
   String? get currentLibrary =>
       _currentWork?.library ?? _currentFolder?.library;
 
-  /// 界面当前选中的页签库：`audio`（音频栏）或 `media`（多媒体栏）。
-  ///
-  /// 页签决定中心区怎么装填，而不是当前作品的库归属：多媒体栏里点进一个音频
-  /// 作品，它的目录层也要按「所有类型一起列」装填，否则中心区一片空白。
-  String _browsingLibrary = 'audio';
-
-  /// 切页签时调用（见 `HomePage._switchLibrary`）。
-  void setBrowsingLibrary(String library) {
-    if (library == _browsingLibrary) return;
-    _browsingLibrary = library;
-    logInfo('AppState', 'browsingLibrary=$library');
-  }
-
-  /// 中心区是否按「所有类型」装填：多媒体栏，或当前就是多媒体作品。
-  bool get _fillsImages => _browsingLibrary == 'media' || isVisualLibrary;
-
-  /// 当前是否在多媒体库。图片与视频合并后只有音频、多媒体两个库。
-  bool get isImageLibrary => currentLibrary == 'media';
-
-  /// 当前是否在多媒体库。
-  ///
-  /// 多媒体库的媒体行在 `media` 表里（音频、图片、视频同表），音频库走
-  /// `tracks` 视图；[_loadCenter] 据此决定装填方式。
-  bool get isVisualLibrary => currentLibrary == 'media';
 
 
   /// 批量「从软件移除」：只删库里的媒体行，磁盘文件不动。
@@ -685,82 +637,45 @@ class AppState extends ChangeNotifier {
 
   /// 加载中间栏。[gen] 是发起时的 [refresh] 代际。
   ///
-  /// 按当前作品/目录的库归属分流：视觉库（图片/视频）填 [_images]，音频库填 [_tracks]。
+  /// 应用只剩音频库，中间栏只填曲目与文件夹。
   Future<void> _loadCenter(int gen) async {
     _loading = true;
     notifyListeners();
     try {
       final search = _searchQuery.trim();
       final filterActive = hasAdvancedFilter || _tagFilter.active;
-      final visual = _fillsImages;
-      // 多媒体库不限类型：音频、图片、视频行都在 media 表里，一起装填。音频库
-      // 只看音频行。标签筛选也按这个取值，null 表示不限媒体类型。
-      final MediaType? matchType = visual ? null : MediaType.audio;
 
       List<VirtualFolder> folders;
       List<TrackItem> tracks;
-      List<MediaItem> images;
 
       if (search.isNotEmpty) {
         folders = const [];
-        if (visual) {
-          tracks = const [];
-          var list = await _mediaDao.searchByName(search, type: null);
-          if (filterActive) {
-            final ids = await _computeMatchingIds(matchType);
-            list =
-                list.where((i) => i.id != null && ids.contains(i.id)).toList();
-          }
-          images = list;
-        } else {
-          images = const [];
-          var list = await _trackDao.searchByName(search);
-          if (filterActive) {
-            final ids = await _computeMatchingIds(matchType);
-            list = list.where((t) => ids.contains(t.id)).toList();
-          }
-          tracks = list;
+        var list = await _trackDao.searchByName(search);
+        if (filterActive) {
+          final ids = await _computeMatchingIds(MediaType.audio);
+          list = list.where((t) => ids.contains(t.id)).toList();
         }
+        tracks = list;
       } else {
         if (_currentWork != null && _currentFolderId != null) {
           folders = await _folderDao.listChildren(_currentFolderId!);
-          if (visual) {
-            tracks = const [];
-            images = _currentFolderPath == null
-                ? const <MediaItem>[]
-                : await _mediaDao.queryDirectInDir(_currentFolderPath!,
-                    type: null);
-          } else {
-            images = const [];
-            tracks = _currentFolderPath == null
-                ? <TrackItem>[]
-                : await _trackDao.queryDirectInDir(_currentFolderPath!);
-          }
+          tracks = _currentFolderPath == null
+              ? <TrackItem>[]
+              : await _trackDao.queryDirectInDir(_currentFolderPath!);
         } else if (_currentWork != null) {
-          // 视觉库的作品层只平铺媒体，媒体由 ImageGrid 自己按作品查（入口文件夹
-          // 与作品同名，再画一层磁贴就是同一个名字出现两次）；音频库保留入口
-          // 文件夹，它是进入专辑/歌单的入口。
-          folders = visual
-              ? const []
-              : await _folderDao.listRootsByWork(_currentWork!.id!);
+          // 作品层保留入口文件夹，它是进入专辑/歌单的入口。
+          folders = await _folderDao.listRootsByWork(_currentWork!.id!);
           tracks = const [];
-          images = const [];
         } else {
           folders = const [];
           tracks = const [];
-          images = const [];
         }
 
         if (filterActive) {
-          final ids = await _computeMatchingIds(matchType);
-          if (visual) {
-            images = images
-                .where((i) => i.id != null && ids.contains(i.id))
-                .toList();
-          } else {
-            tracks = tracks.where((t) => ids.contains(t.id)).toList();
-          }
-          folders = await _filterFolders(folders, ids, matchType);
+          final ids = await _computeMatchingIds(MediaType.audio);
+          tracks = tracks.where((t) => ids.contains(t.id)).toList();
+          folders =
+              await _filterFolders(folders, ids, MediaType.audio);
         }
       }
 
@@ -771,8 +686,6 @@ class AppState extends ChangeNotifier {
       }
       _centerFolders = _sortFolders(folders);
       _tracks = _sortTracks(tracks);
-      _setImages(_sortImages(images));
-      _totalCount = _images.length;
       // 选中集合只保留当前可见的条目。切到别的作品或文件夹之后，
       // 「批量打标签」「移动」不会落到看不见的条目上。
       final visibleTrackIds = _tracks.map((t) => t.id).whereType<int>().toSet();
@@ -788,7 +701,7 @@ class AppState extends ChangeNotifier {
       }
 
       logInfo('AppState',
-          'Center loaded: ${_centerFolders.length} folders, ${_tracks.length} tracks, ${_images.length} images');
+          'Center loaded: ${_centerFolders.length} folders, ${_tracks.length} tracks');
     } finally {
       // 只有最新一代有资格清 loading，否则会提前关掉新一轮的转圈。
       if (gen == _refreshGeneration) {
@@ -2333,7 +2246,7 @@ class AppState extends ChangeNotifier {
     await _mediaDao.setAlias(id, value);
     final updated = await _mediaDao.getById(id);
     if (updated == null) return;
-    _setImages(_images.map((img) => img.id == id ? updated : img).toList());
+    _mediaRevision++;
     notifyListeners();
   }
 
@@ -2678,8 +2591,8 @@ class AppState extends ChangeNotifier {
     _videoCoverFutures.clear();
     // 在屏的磁贴读的是内存里那一行，换掉它，用户点完菜单立刻看到新封面。
     final updated = await _mediaDao.getById(id);
-    if (updated != null && _images.any((m) => m.id == id)) {
-      _setImages(_images.map((m) => m.id == id ? updated : m).toList());
+    if (updated == null) {
+      logWarn('AppState', 'setMediaCover 后重读媒体行失败: id=$id');
     }
     _mediaRevision++;
     notifyListeners();
