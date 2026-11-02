@@ -5,10 +5,11 @@
 
 #include <string>
 
-/// 置顶的桌面歌词窗口。
+/// Always-on-top desktop lyric window.
 ///
-/// 用独立的 WS_POPUP 窗口而不是 Flutter 子窗口，才能在主窗口最小化或失焦
-/// 后继续显示；文字只由 Dart 侧推过来，这里不碰播放器。
+/// A standalone WS_POPUP window (not a Flutter child) so it stays visible when
+/// the main window is minimized or unfocused. Text is pushed from Dart; this
+/// class does not touch the player.
 class SubtitleOverlay {
  public:
   SubtitleOverlay() = default;

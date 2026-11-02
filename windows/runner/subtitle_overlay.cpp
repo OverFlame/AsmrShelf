@@ -102,7 +102,7 @@ bool SubtitleOverlay::EnsureWindow() {
 
   window_ = CreateWindowExW(
       WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-      kClassName, L"AsmrShelf 字幕", WS_POPUP, 0, 0, 420, 96,
+      kClassName, L"AsmrShelf Subtitle", WS_POPUP, 0, 0, 420, 96,
       nullptr, nullptr, GetModuleHandleW(nullptr), this);
   if (!window_) {
     return false;
@@ -138,7 +138,8 @@ void SubtitleOverlay::Layout() {
 
   RECT work{};
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-  int max_window_width = (work.right - work.left) - Scale(80, dpi);
+  int max_window_width =
+      static_cast<int>(work.right - work.left) - Scale(80, dpi);
   max_window_width = std::max(max_window_width, Scale(280, dpi));
   const int max_text_width = std::max(Scale(220, dpi),
                                       std::min(Scale(820, dpi),
@@ -155,7 +156,9 @@ void SubtitleOverlay::Layout() {
   DeleteObject(current_font);
   DeleteObject(next_font);
 
-  int width = std::max(current_size.cx, next_size.cx) + 2 * padding_x;
+  int width = std::max(static_cast<int>(current_size.cx),
+                       static_cast<int>(next_size.cx)) +
+              2 * padding_x;
   width = std::max(width, Scale(220, dpi));
   width = std::min(width, max_window_width);
 
@@ -203,8 +206,8 @@ void SubtitleOverlay::Paint(HDC dc) {
   const int dpi = Dpi();
   const int padding_x = Scale(26, dpi);
   const int padding_y = Scale(14, dpi);
-  const int max_text_width = std::max(Scale(160, dpi),
-                                      client.right - 2 * padding_x);
+  const int max_text_width =
+      std::max(Scale(160, dpi), static_cast<int>(client.right) - 2 * padding_x);
 
   HFONT current_font = CreateOverlayFont(24, dpi, FW_SEMIBOLD);
   HFONT next_font = CreateOverlayFont(16, dpi, FW_NORMAL);
@@ -244,14 +247,16 @@ void SubtitleOverlay::ClampToWorkArea() {
   SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
   RECT rect{};
   GetWindowRect(window_, &rect);
-  const int width = rect.right - rect.left;
-  const int height = rect.bottom - rect.top;
+  const int width = static_cast<int>(rect.right - rect.left);
+  const int height = static_cast<int>(rect.bottom - rect.top);
   const int margin = Scale(8, Dpi());
-  const int x = std::clamp(rect.left, static_cast<int>(work.left) + margin,
+  const int x = std::clamp(static_cast<int>(rect.left),
+                           static_cast<int>(work.left) + margin,
                            std::max(static_cast<int>(work.left) + margin,
                                     static_cast<int>(work.right) - width -
                                         margin));
-  const int y = std::clamp(rect.top, static_cast<int>(work.top) + margin,
+  const int y = std::clamp(static_cast<int>(rect.top),
+                           static_cast<int>(work.top) + margin,
                            std::max(static_cast<int>(work.top) + margin,
                                     static_cast<int>(work.bottom) - height -
                                         margin));
