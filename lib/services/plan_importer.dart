@@ -20,6 +20,7 @@ class ImportOutcome {
     this.worksSkipped = 0,
     this.tracksInserted = 0,
     this.tracksSkipped = 0,
+    this.createdWorkIds = const [],
   });
 
   final int worksCreated;
@@ -30,6 +31,9 @@ class ImportOutcome {
 
   /// 已存在的曲目行数（`media.path` 冲突被忽略）。
   final int tracksSkipped;
+
+  /// 本次新建作品的 id，供「导入后自动刮削」这类后续动作使用。
+  final List<int> createdWorkIds;
 
   @override
   String toString() => 'ImportOutcome(作品 $worksCreated 新建 / $worksSkipped 跳过, '
@@ -52,6 +56,7 @@ class PlanImporter {
     var skipped = 0;
     var inserted = 0;
     var duplicate = 0;
+    final createdIds = <int>[];
 
     for (final work in plan.works) {
       final existingId = await _workIdByRootPath(work.dirPath);
@@ -97,6 +102,7 @@ class PlanImporter {
         ));
       }
       created++;
+      createdIds.add(workId);
     }
 
     return ImportOutcome(
@@ -104,6 +110,7 @@ class PlanImporter {
       worksSkipped: skipped,
       tracksInserted: inserted,
       tracksSkipped: duplicate,
+      createdWorkIds: List.unmodifiable(createdIds),
     );
   }
 

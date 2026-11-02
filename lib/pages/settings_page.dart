@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/backup_service.dart';
 import '../services/settings_service.dart';
 import '../services/subtitle_style.dart';
 import '../services/thumbnail_cache.dart';
@@ -237,6 +238,20 @@ class SettingsPage extends StatelessWidget {
             enabled: appState.autoImportRoots.isNotEmpty,
             onTap: () => _runAutoImportNow(context, appState),
           ),
+          SwitchListTile(
+            key: const ValueKey('auto-scrape-after-import'),
+            secondary: const Icon(Icons.travel_explore_outlined, size: 18),
+            title: const Text('导入后自动抓取 DLsite'),
+            subtitle: Text(
+              '新导入的作品排队抓取元数据；需要联网，默认关闭',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            value: appState.autoScrapeAfterImport,
+            onChanged: (v) => appState.setAutoScrapeAfterImport(v),
+          ),
           ListTile(
             key: const ValueKey('auto-import-ignored'),
             leading: const Icon(Icons.visibility_off_outlined, size: 18),
@@ -284,6 +299,14 @@ class SettingsPage extends StatelessWidget {
             subtitle: const Text('把数据库、封面缓存、设置整体迁移到其它位置'),
             trailing: const Icon(Icons.chevron_right, size: 18),
             onTap: () => _migrateDataDir(context, appState),
+          ),
+          ListTile(
+            key: const ValueKey('backup-export'),
+            leading: const Icon(Icons.archive_outlined, size: 18),
+            title: const Text('导出数据库备份'),
+            subtitle: const Text('把当前库复制成一份带时间戳的 .db 文件'),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => _exportBackup(context),
           ),
           const Divider(height: 1),
 
@@ -731,6 +754,26 @@ class SettingsPage extends StatelessWidget {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 选目录 → 复制一份一致的数据库快照。
+  Future<void> _exportBackup(BuildContext context) async {
+    final dir = await pickDirectory(title: '选择备份保存目录');
+    if (dir == null) return;
+    try {
+      final result = await BackupService().export(dir);
+      if (!context.mounted) return;
+      final mb = (result.bytes / (1024 * 1024)).toStringAsFixed(1);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已备份到 ${result.path}（$mb MB）')),
+      );
+    } catch (e) {
+      logWarn('Settings', '导出备份失败: $e');
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('备份失败：$e')));
+    }
   }
 
   /// 清空磁盘缩略图缓存 + 内存缓存，并让在屏卡片重新生成缩略图。

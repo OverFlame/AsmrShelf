@@ -315,6 +315,15 @@ class SettingsService {
   Future<void> removeAutoImportIgnored(String dir) =>
       setAutoImportIgnored(autoImportIgnored.where((e) => e != dir));
 
+  /// 导入完成后是否给新作品排队抓 DLsite 元数据。默认关，避免无感的网络请求。
+  bool get autoScrapeAfterImport =>
+      (_data['auto_scrape_after_import'] as bool?) ?? false;
+
+  Future<void> setAutoScrapeAfterImport(bool enabled) async {
+    _data['auto_scrape_after_import'] = enabled;
+    await _save();
+  }
+
   /// 上一次自动导入的时间（毫秒时间戳），没有跑过时为 null。
   int? get lastAutoImportAt => _data['last_auto_import_at'] as int?;
 

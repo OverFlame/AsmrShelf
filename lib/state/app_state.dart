@@ -1531,11 +1531,19 @@ class AppState extends ChangeNotifier {
         '一次性导入：作品 ${outcome.worksCreated} 新建 / ${outcome.worksSkipped} 跳过，'
             '曲目 ${outcome.tracksInserted} 新增 / ${outcome.tracksSkipped} 已存在',
       );
+      _autoScrapeNewWorks(outcome);
       await refresh();
       return outcome;
     } finally {
       _endImport();
     }
+  }
+
+  /// 设置开着时，把刚导入的作品排进 DLsite 抓取队列。
+  void _autoScrapeNewWorks(ImportOutcome outcome) {
+    if (!SettingsService.instance.autoScrapeAfterImport) return;
+    if (outcome.createdWorkIds.isEmpty) return;
+    dlsite.enqueueScrape(outcome.createdWorkIds);
   }
 
   // ═══════════════ 自动导入 ═══════════════
@@ -1555,6 +1563,14 @@ class AppState extends ChangeNotifier {
 
   /// 上一次自动导入的时间（毫秒时间戳）。没跑过为 null。
   int? get lastAutoImportAt => SettingsService.instance.lastAutoImportAt;
+
+  bool get autoScrapeAfterImport =>
+      SettingsService.instance.autoScrapeAfterImport;
+
+  Future<void> setAutoScrapeAfterImport(bool enabled) async {
+    await SettingsService.instance.setAutoScrapeAfterImport(enabled);
+    notifyListeners();
+  }
 
   Future<void> setAutoImportEnabled(bool enabled) async {
     await SettingsService.instance.setAutoImportEnabled(enabled);
@@ -1605,6 +1621,7 @@ class AppState extends ChangeNotifier {
       var skipped = 0;
       var inserted = 0;
       var insertedSkipped = 0;
+      final createdIds = <int>[];
       for (final c in selected) {
         if (c.state == AutoImportState.newWork) {
           final work = await planImportWork(c.dirPath);
@@ -1619,6 +1636,7 @@ class AppState extends ChangeNotifier {
           skipped += outcome.worksSkipped;
           inserted += outcome.tracksInserted;
           insertedSkipped += outcome.tracksSkipped;
+          createdIds.addAll(outcome.createdWorkIds);
         } else if (c.state == AutoImportState.newTracks &&
             c.workId != null) {
           final work = await _workDao.getById(c.workId!);
@@ -1640,11 +1658,16 @@ class AppState extends ChangeNotifier {
         'AppState',
         '确认导入：新建 $created 部，新增 $inserted 首，跳过 $skipped 部',
       );
+      if (createdIds.isNotEmpty &&
+          SettingsService.instance.autoScrapeAfterImport) {
+        dlsite.enqueueScrape(createdIds);
+      }
       return ImportOutcome(
         worksCreated: created,
         worksSkipped: skipped,
         tracksInserted: inserted,
         tracksSkipped: insertedSkipped,
+        createdWorkIds: createdIds,
       );
     } finally {
       _endImport();
