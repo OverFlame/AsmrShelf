@@ -72,6 +72,7 @@ class AppState extends ChangeNotifier {
 
   // ── 中间栏内容 ──
   List<VirtualFolder> get centerFolders => library.centerFolders;
+
   /// 播放位置落盘的节流（见 lib/services/play_position.dart）
 
   List<TrackItem> get tracks => library.tracks;
@@ -79,7 +80,6 @@ class AppState extends ChangeNotifier {
   /// 媒体行增删的代数，界面据此知道该重查。
   int _mediaRevision = 0;
   int get mediaRevision => _mediaRevision;
-
 
   bool get loading => library.loading;
 
@@ -101,7 +101,6 @@ class AppState extends ChangeNotifier {
   TagFilter get tagFilter => tags.tagFilter;
   String get advancedFilter => tags.advancedFilter;
   bool get hasAdvancedFilter => tags.hasAdvancedFilter;
-
 
   // ── 图片视图设置 ──
   int get gridColumns => settings.gridColumns;
@@ -152,7 +151,6 @@ class AppState extends ChangeNotifier {
   static const Duration _thumbBackfillNotifyGap = Duration(milliseconds: 250);
   DateTime? _thumbBackfillLastNotify;
 
-
   // ── 导入状态 ──
   /// 导入进度与并发守卫拆到了 [ImportState]。
   final ImportState importState = ImportState();
@@ -167,6 +165,7 @@ class AppState extends ChangeNotifier {
 
   // ── 最近播放 ──
   List<TrackItem> get recentTracks => playback.recentTracks;
+
   /// [loadRecentTracks] 的代际：快速切歌会并发触发多次重载，只有最后一次能写回。
 
   // ── 播放队列来源作品的封面（在 CoverState 里）──
@@ -373,7 +372,6 @@ class AppState extends ChangeNotifier {
   /// DLsite 元数据状态：编号解析、抓取、预览与应用。
   late final DlsiteState dlsite;
 
-
   Future<void> init() async {
     logInfo('AppState', 'Initializing...');
     // 缩略图服务必须在这里初始化：界面一建卡片就会调 thumbPath()，
@@ -396,6 +394,8 @@ class AppState extends ChangeNotifier {
     await loadCoverCacheLimit();
     await refresh();
     logInfo('AppState', 'Initialized OK');
+    // 启动后的自动导入不挡界面：先让首页画出来，再在后台扫目录。
+    unawaited(autoImportOnStartup());
   }
 
   // ═══════════════ 设置 ═══════════════
@@ -419,23 +419,23 @@ class AppState extends ChangeNotifier {
 
   /// 规则标签要补的全部扩展名，四种媒体各自的扫描白名单并集。
   static Iterable<String> get _ruleTagExtensions => {
-        ...audioExtensions,
-        ...imageExtensions,
-        ...videoExtensions,
-        ...knownSubtitleExtensions,
-      };
+    ...audioExtensions,
+    ...imageExtensions,
+    ...videoExtensions,
+    ...knownSubtitleExtensions,
+  };
 
   static RepeatMode _repeatModeFromName(String name) => switch (name) {
-        'off' => RepeatMode.off,
-        'one' => RepeatMode.one,
-        _ => RepeatMode.all,
-      };
+    'off' => RepeatMode.off,
+    'one' => RepeatMode.one,
+    _ => RepeatMode.all,
+  };
 
   static String _repeatModeName(RepeatMode mode) => switch (mode) {
-        RepeatMode.off => 'off',
-        RepeatMode.one => 'one',
-        RepeatMode.all => 'all',
-      };
+    RepeatMode.off => 'off',
+    RepeatMode.one => 'one',
+    RepeatMode.all => 'all',
+  };
 
   Future<void> _persistRepeatMode(RepeatMode mode) async {
     if (_loadingSettings) return;
@@ -530,8 +530,6 @@ class AppState extends ChangeNotifier {
   String? get currentLibrary =>
       library.currentWork?.library ?? library.currentFolder?.library;
 
-
-
   /// 批量「从软件移除」：只删库里的媒体行，磁盘文件不动。
   ///
   /// 返回真正删掉的行数。关联的标签行由外键级联清掉。
@@ -544,7 +542,8 @@ class AppState extends ChangeNotifier {
       library.selectedTrackIds.remove(id);
     }
     if (library.selectedTrackIds.isEmpty) library.selectionMode = false;
-    if (library.anchorTrackId != null && !library.selectedTrackIds.contains(library.anchorTrackId)) {
+    if (library.anchorTrackId != null &&
+        !library.selectedTrackIds.contains(library.anchorTrackId)) {
       library.anchorTrackId = null;
     }
     _mediaRevision++;
@@ -552,7 +551,6 @@ class AppState extends ChangeNotifier {
     logInfo('AppState', '批量移除媒体 $deleted 条（请求 ${list.length} 条）');
     return deleted;
   }
-
 
   // ═══════════════ 刷新 / 中间栏加载（实现在 LibraryState）═══════════════
 
@@ -565,7 +563,11 @@ class AppState extends ChangeNotifier {
   /// `MediaType.audio`，多媒体库传 null（不限类型）。
   Future<Set<int>> _computeMatchingIds(MediaType? type) async {
     if (hasAdvancedFilter) {
-      return _tagDao.getIdsByExpression(type, tags.advancedFilter, tags.allTags);
+      return _tagDao.getIdsByExpression(
+        type,
+        tags.advancedFilter,
+        tags.allTags,
+      );
     }
     return _tagDao.getIdsByTags(
       type,
@@ -576,18 +578,22 @@ class AppState extends ChangeNotifier {
   }
 
   Future<List<VirtualFolder>> _filterFolders(
-      List<VirtualFolder> folders, Set<int> matchingIds, MediaType? type) async {
+    List<VirtualFolder> folders,
+    Set<int> matchingIds,
+    MediaType? type,
+  ) async {
     if (folders.isEmpty) return [];
     final matchingPaths = matchingIds.isEmpty
         ? <String>[]
         : type == MediaType.audio
-            ? await _trackDao.pathsByIds(matchingIds)
-            : await _mediaDao.pathsByIds(matchingIds, type: type);
+        ? await _trackDao.pathsByIds(matchingIds)
+        : await _mediaDao.pathsByIds(matchingIds, type: type);
 
     Map<int, List<Tag>> folderTags = {};
     if (!hasAdvancedFilter && tags.tagFilter.active) {
-      folderTags =
-          await _tagDao.getTagsForFolders(folders.map((f) => f.id!).toList());
+      folderTags = await _tagDao.getTagsForFolders(
+        folders.map((f) => f.id!).toList(),
+      );
     }
 
     // 一次取全部目录路径，再把命中路径排好序做二分查找。
@@ -599,8 +605,9 @@ class AppState extends ChangeNotifier {
     final result = <VirtualFolder>[];
     for (final f in folders) {
       final paths = allPaths[f.id!] ?? const <FolderPath>[];
-      final containsTrack =
-          paths.any((p) => _hasPathUnder(matchingLower, p.path));
+      final containsTrack = paths.any(
+        (p) => _hasPathUnder(matchingLower, p.path),
+      );
       if (containsTrack) {
         result.add(f);
         continue;
@@ -664,7 +671,9 @@ class AppState extends ChangeNotifier {
       int cmp;
       switch (settings.sortKey) {
         case 'title':
-          cmp = a.displayTitle.toLowerCase().compareTo(b.displayTitle.toLowerCase());
+          cmp = a.displayTitle.toLowerCase().compareTo(
+            b.displayTitle.toLowerCase(),
+          );
           break;
         case 'duration':
           cmp = (a.durationMs ?? 0).compareTo(b.durationMs ?? 0);
@@ -765,10 +774,11 @@ class AppState extends ChangeNotifier {
     await _workDao.rename(id, name);
     if (library.currentWork?.id == id) {
       library.currentWork = Work(
-          id: id,
-          name: name,
-          coverPath: library.currentWork!.coverPath,
-          createdAt: library.currentWork!.createdAt);
+        id: id,
+        name: name,
+        coverPath: library.currentWork!.coverPath,
+        createdAt: library.currentWork!.createdAt,
+      );
     }
     await refresh();
   }
@@ -787,10 +797,11 @@ class AppState extends ChangeNotifier {
     await _workDao.setCover(id, coverPath);
     if (library.currentWork?.id == id) {
       library.currentWork = Work(
-          id: id,
-          name: library.currentWork!.name,
-          coverPath: coverPath,
-          createdAt: library.currentWork!.createdAt);
+        id: id,
+        name: library.currentWork!.name,
+        coverPath: coverPath,
+        createdAt: library.currentWork!.createdAt,
+      );
     }
     notifyListeners();
     await refresh();
@@ -807,8 +818,9 @@ class AppState extends ChangeNotifier {
   Future<void> deleteFolder(int id) async {
     // 先记下这个文件夹自己挂在哪几条路径上：删完之后 folder_paths 会被 CASCADE 清掉，
     // 再想问「哪些曲目本来是靠它才可见的」就没有依据了。
-    final removedPaths =
-        (await _folderDao.getPaths(id)).map((fp) => fp.path).toList();
+    final removedPaths = (await _folderDao.getPaths(
+      id,
+    )).map((fp) => fp.path).toList();
     await _folderDao.delete(id);
     await _pruneTracksLeftBehind(removedPaths);
     _bumpFolderVersion();
@@ -850,8 +862,7 @@ class AppState extends ChangeNotifier {
     final deleted = await _trackDao.deleteByPaths(orphan);
     tags.clearCaches();
     if (deleted > 0) _mediaRevision++;
-    logInfo('AppState',
-        '删除文件夹后清理失联曲目 ${orphan.length} 条（实删 $deleted 行）');
+    logInfo('AppState', '删除文件夹后清理失联曲目 ${orphan.length} 条（实删 $deleted 行）');
     return deleted;
   }
 
@@ -863,7 +874,8 @@ class AppState extends ChangeNotifier {
     final ids = await _expandFoldersDeep(<int>{id});
     final deleted = await _deleteFoldersDeep(ids);
     _bumpFolderVersion();
-    if (library.currentFolderId != null && ids.contains(library.currentFolderId)) {
+    if (library.currentFolderId != null &&
+        ids.contains(library.currentFolderId)) {
       library.currentFolderId = null;
       library.currentFolder = null;
       library.currentFolderPath = null;
@@ -878,7 +890,8 @@ class AppState extends ChangeNotifier {
   Future<int> deleteWorkDeep(int workId) async {
     final owned = await _folderDao.listByWork(workId);
     final ids = await _expandFoldersDeep(
-        owned.map((f) => f.id).whereType<int>().toSet());
+      owned.map((f) => f.id).whereType<int>().toSet(),
+    );
     final deleted = await _deleteFoldersDeep(ids);
     // 文件夹已删，这里只剩摘掉已不存在的归属并删除作品行。
     await _workDao.delete(workId);
@@ -925,8 +938,9 @@ class AppState extends ChangeNotifier {
       );
       for (final root in rootPaths) {
         try {
-          await for (final entity in Directory(root)
-              .list(recursive: true, followLinks: false)) {
+          await for (final entity in Directory(
+            root,
+          ).list(recursive: true, followLinks: false)) {
             if (entity is File && isImageFile(entity.path)) {
               paths.add(entity.path);
             }
@@ -959,7 +973,8 @@ class AppState extends ChangeNotifier {
   Future<int> countMediaUnderWork(int workId) async {
     final owned = await _folderDao.listByWork(workId);
     final ids = await _expandFoldersDeep(
-        owned.map((f) => f.id).whereType<int>().toSet());
+      owned.map((f) => f.id).whereType<int>().toSet(),
+    );
     return _countMediaInFolders(ids);
   }
 
@@ -981,7 +996,8 @@ class AppState extends ChangeNotifier {
       for (final entry in all.entries) {
         if (ids.contains(entry.key)) continue;
         final inside = entry.value.any(
-            (fp) => removed.any((r) => fp.path == r || p.isWithin(r, fp.path)));
+          (fp) => removed.any((r) => fp.path == r || p.isWithin(r, fp.path)),
+        );
         if (!inside) continue;
         ids.addAll(await _folderDao.collectDescendants(entry.key));
         removed.addAll(entry.value.map((fp) => fp.path));
@@ -1031,8 +1047,7 @@ class AppState extends ChangeNotifier {
     // 媒体行被删了就要推进代数：作品层的 ImageGrid 缓存着查过的列表，
     // 只靠 folderVersion 它不知道该重查，删掉的磁贴会留在界面上。
     if (deleted > 0) _mediaRevision++;
-    logInfo('AppState',
-        '深度删除后清理媒体 ${victims.length} 条（实删 $deleted 行）');
+    logInfo('AppState', '深度删除后清理媒体 ${victims.length} 条（实删 $deleted 行）');
     return deleted;
   }
 
@@ -1117,15 +1132,20 @@ class AppState extends ChangeNotifier {
 
   /// 多媒体库要落行的文件：图片与视频一起。音频走 [ImportService]，因为时长、
   /// 内嵌封面与字幕配对都在那条链上。
-  static List<String> _visualPaths(ScanResult scan) =>
-      <String>[...scan.imagePaths, ...scan.videoPaths];
+  static List<String> _visualPaths(ScanResult scan) => <String>[
+    ...scan.imagePaths,
+    ...scan.videoPaths,
+  ];
 
   /// 新建一个多媒体作品，把扫描到的图片、视频与音频一起落库并挂上虚拟文件夹。
   ///
   /// 图片与视频直接写 media 表；音频交给 [ImportService]，这样时长、内嵌封面、
   /// 字幕配对与音频栏一致。同一个目录两条链都跑，作品与文件夹共用一份。
   Future<Work?> _importVisualWork(
-      String dirPath, String library, ScanResult scan) async {
+    String dirPath,
+    String library,
+    ScanResult scan,
+  ) async {
     final visualPaths = _visualPaths(scan);
     final paths = <String>[...visualPaths, ...scan.audioPaths];
     if (paths.isEmpty) {
@@ -1140,11 +1160,20 @@ class AppState extends ChangeNotifier {
     final work = await _workDao.create(_baseName(dirPath), library: library);
     var imported = 0;
     if (visualPaths.isNotEmpty) {
-      imported += await _runVisualImport(dirPath, work.id!, library, visualPaths);
+      imported += await _runVisualImport(
+        dirPath,
+        work.id!,
+        library,
+        visualPaths,
+      );
     }
     if (scan.audioPaths.isNotEmpty) {
-      imported +=
-          await _runImport(dirPath, work.id!, scan: scan, library: library);
+      imported += await _runImport(
+        dirPath,
+        work.id!,
+        scan: scan,
+        library: library,
+      );
     }
     if (imported == 0) {
       final why = importState.error ?? '没有新条目落库';
@@ -1157,7 +1186,11 @@ class AppState extends ChangeNotifier {
 
   /// 把图片与视频写进 media 表，并在目标库下建/复用虚拟文件夹。
   Future<int> _runVisualImport(
-      String dirPath, int workId, String library, List<String> paths) async {
+    String dirPath,
+    int workId,
+    String library,
+    List<String> paths,
+  ) async {
     var imported = 0;
     final freshPaths = <String>[];
     try {
@@ -1193,10 +1226,13 @@ class AppState extends ChangeNotifier {
       }
       imported = await _mediaDao.insertRows(rows);
       // 目录本身挂成一个虚拟文件夹，ensureByPath 内部会补 folder_paths。
-      await _folderDao.ensureByPath(dirPath,
-          name: _baseName(dirPath), workId: workId, library: library);
-      logInfo('AppState',
-          '导入落库 $imported 条（扫描 ${paths.length} 条）: $dirPath');
+      await _folderDao.ensureByPath(
+        dirPath,
+        name: _baseName(dirPath),
+        workId: workId,
+        library: library,
+      );
+      logInfo('AppState', '导入落库 $imported 条（扫描 ${paths.length} 条）: $dirPath');
     } catch (e) {
       importState.fail(e);
       logError('AppState', '导入失败', e.toString());
@@ -1329,8 +1365,9 @@ class AppState extends ChangeNotifier {
       }
       final now = DateTime.now().millisecondsSinceEpoch;
       final rows = <Map<String, Object?>>[];
-      await for (final entity
-          in Directory(root).list(recursive: true, followLinks: false)) {
+      await for (final entity in Directory(
+        root,
+      ).list(recursive: true, followLinks: false)) {
         if (entity is! File) continue;
         final path = entity.path;
         if (!audioExtensions.contains(extOfPath(path))) continue;
@@ -1346,18 +1383,21 @@ class AppState extends ChangeNotifier {
       }
       if (rows.isNotEmpty) added += await _mediaDao.insertRows(rows);
       // 失联行：库里登记在这部作品下、磁盘上已经没有的音频
-      final existing =
-          await _mediaDao.queryByDirs([root], type: MediaType.audio);
+      final existing = await _mediaDao.queryByDirs([
+        root,
+      ], type: MediaType.audio);
       final stale = <String>[];
       for (final item in existing) {
         if (!await File(item.path).exists()) stale.add(item.path);
       }
       removed += await _mediaDao.deleteByPaths(stale, type: MediaType.audio);
     }
-    logInfo('AppState',
-        '重扫磁盘：新增 $added 条，删除失联 $removed 条，缺目录 $missingRoots 个');
+    logInfo('AppState', '重扫磁盘：新增 $added 条，删除失联 $removed 条，缺目录 $missingRoots 个');
     return RescanOutcome(
-        added: added, removed: removed, missingRoots: missingRoots);
+      added: added,
+      removed: removed,
+      missingRoots: missingRoots,
+    );
   }
 
   /// 给一部作品抓 DLsite 元数据并直接落库。
@@ -1367,8 +1407,7 @@ class AppState extends ChangeNotifier {
   Future<DlsiteFetchResult> fetchDlsiteMetadata(
     int workId, {
     bool applyCover = false,
-  }) =>
-      dlsite.fetch(workId, applyCover: applyCover);
+  }) => dlsite.fetch(workId, applyCover: applyCover);
 
   /// 只抓取不落标签，给预览对话框看。
   Future<DlsiteFetchResult> previewDlsiteMetadata(int workId) =>
@@ -1379,8 +1418,7 @@ class AppState extends ChangeNotifier {
     int workId,
     DlsiteWork work, {
     bool applyCover = false,
-  }) =>
-      dlsite.apply(workId, work, applyCover: applyCover);
+  }) => dlsite.apply(workId, work, applyCover: applyCover);
 
   /// 下载远程封面并设为作品封面，返回本地路径；失败抛 [DlsiteImageException]。
   Future<String> downloadDlsiteCover(int workId, String url) =>
@@ -1414,16 +1452,74 @@ class AppState extends ChangeNotifier {
     if (!_beginImport('importWorksFromRoot')) return null;
     try {
       final plan = await scanImportTree(rootPath, nested: nested);
-      final outcome =
-          await PlanImporter(DatabaseManager.instance.db).apply(plan);
-      logInfo('AppState',
-          '一次性导入：作品 ${outcome.worksCreated} 新建 / ${outcome.worksSkipped} 跳过，'
-          '曲目 ${outcome.tracksInserted} 新增 / ${outcome.tracksSkipped} 已存在');
+      final outcome = await PlanImporter(
+        DatabaseManager.instance.db,
+      ).apply(plan);
+      logInfo(
+        'AppState',
+        '一次性导入：作品 ${outcome.worksCreated} 新建 / ${outcome.worksSkipped} 跳过，'
+            '曲目 ${outcome.tracksInserted} 新增 / ${outcome.tracksSkipped} 已存在',
+      );
       await refresh();
       return outcome;
     } finally {
       _endImport();
     }
+  }
+
+  // ═══════════════ 自动导入 ═══════════════
+
+  /// 启动时是否自动扫描 [autoImportRoot]。
+  bool get autoImportEnabled => SettingsService.instance.autoImportEnabled;
+
+  /// 自动导入的根目录。每部作品占一个子目录。
+  String? get autoImportRoot => SettingsService.instance.autoImportRoot;
+
+  /// 上一次自动导入的时间（毫秒时间戳）。没跑过为 null。
+  int? get lastAutoImportAt => SettingsService.instance.lastAutoImportAt;
+
+  Future<void> setAutoImportEnabled(bool enabled) async {
+    await SettingsService.instance.setAutoImportEnabled(enabled);
+    notifyListeners();
+  }
+
+  Future<void> setAutoImportRoot(String? root) async {
+    await SettingsService.instance.setAutoImportRoot(root);
+    notifyListeners();
+  }
+
+  /// 按设置里的根目录导一次。没配目录、目录不存在或已有导入在跑都返回 null。
+  ///
+  /// 与手动「导入目录」走同一条 [importWorksFromRoot] 路径，已存在的作品
+  /// 与曲目按跳过处理，所以可以每次启动都跑。
+  Future<ImportOutcome?> autoImportFromRoot() async {
+    final root = autoImportRoot;
+    if (root == null) return null;
+    if (!await Directory(root).exists()) {
+      logWarn('AppState', '自动导入目录不存在，跳过：$root');
+      return null;
+    }
+    final outcome = await importWorksFromRoot(root);
+    if (outcome == null) return null;
+    await SettingsService.instance.setLastAutoImportAt(
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    notifyListeners();
+    return outcome;
+  }
+
+  /// 启动时调用一次。开关关着时什么都不做。
+  Future<ImportOutcome?> autoImportOnStartup() async {
+    if (!autoImportEnabled) return null;
+    final outcome = await autoImportFromRoot();
+    if (outcome != null) {
+      logInfo(
+        'AppState',
+        '启动自动导入：新建 ${outcome.worksCreated} 部，'
+            '新增 ${outcome.tracksInserted} 首',
+      );
+    }
+    return outcome;
   }
 
   Future<void> importDirectoryIntoWork(String dirPath, int workId) async {
@@ -1470,13 +1566,21 @@ class AppState extends ChangeNotifier {
 
   /// 真正干活的部分。调用方负责用 [_beginImport] / [_endImport] 圈住导入期。
   /// 返回处理过的新曲目数，0 表示这次导入没有新增内容。
-  Future<int> _runImport(String dirPath, int workId,
-      {ScanResult? scan, String library = 'audio'}) async {
+  Future<int> _runImport(
+    String dirPath,
+    int workId, {
+    ScanResult? scan,
+    String library = 'audio',
+  }) async {
     var imported = 0;
     try {
       final importService = ImportService.fromDB();
-      final stream = importService.importDirectory(dirPath,
-          workId: workId, scan: scan, library: library);
+      final stream = importService.importDirectory(
+        dirPath,
+        workId: workId,
+        scan: scan,
+        library: library,
+      );
       // 导入流按文件吐进度。逐条 notifyListeners 会让整页重建上千次，
       // 进度条却看不出差别，所以按 1% 粒度通知。
       final throttle = ProgressThrottle();
@@ -1516,13 +1620,13 @@ class AppState extends ChangeNotifier {
   Future<void> setVolumeCover(int folderId, String? path) =>
       covers.setVolumeCover(folderId, path);
 
-  Future<Rect?> volumeCoverCrop(int folderId) => covers.volumeCoverCrop(folderId);
+  Future<Rect?> volumeCoverCrop(int folderId) =>
+      covers.volumeCoverCrop(folderId);
 
   Future<void> setVolumeCoverCrop(int folderId, Rect? crop) =>
       covers.setVolumeCoverCrop(folderId, crop);
 
-  Future<void> setVolumeCoverWithCrop(
-          int folderId, String? path, Rect? crop) =>
+  Future<void> setVolumeCoverWithCrop(int folderId, String? path, Rect? crop) =>
       covers.setVolumeCoverWithCrop(folderId, path, crop);
 
   // ═══════════════ 字幕归属（BUILD_GUIDE 第 18.5、23.6 节）═══════════════
@@ -1578,7 +1682,10 @@ class AppState extends ChangeNotifier {
           logWarn('AppState', '目录内无音频，未创建系列: $dirPath');
           return null;
         }
-        final work = await _workDao.create(_baseName(dirPath), library: 'audio');
+        final work = await _workDao.create(
+          _baseName(dirPath),
+          library: 'audio',
+        );
         final imported = await _runImport(dirPath, work.id!, scan: scan);
         if (imported == 0) {
           logWarn('AppState', '系列导入没有新曲目，删除空系列: ${work.name}');
@@ -1592,8 +1699,12 @@ class AppState extends ChangeNotifier {
       final work = await _workDao.create(_baseName(dirPath), library: 'audio');
       var imported = 0;
       for (final child in children) {
-        final volume = await _folderDao.ensureByPath(child,
-            name: _baseName(child), workId: work.id!, library: 'audio');
+        final volume = await _folderDao.ensureByPath(
+          child,
+          name: _baseName(child),
+          workId: work.id!,
+          library: 'audio',
+        );
         imported += await _runImport(child, work.id!);
         await _tagBonusDirs(child);
         logInfo('AppState', '系列卷导入: ${volume.name}（$child）');
@@ -1750,8 +1861,7 @@ class AppState extends ChangeNotifier {
   Future<List<Tag>> getImageTags(int imageId) => tags.getImageTags(imageId);
   Future<List<Tag>> getTagsForMedia(int mediaId) =>
       tags.getTagsForMedia(mediaId);
-  Future<List<Tag>> getFolderTags(int folderId) =>
-      tags.getFolderTags(folderId);
+  Future<List<Tag>> getFolderTags(int folderId) => tags.getFolderTags(folderId);
   Future<({int media, int folders})> tagUsageCounts(int tagId) =>
       tags.tagUsageCounts(tagId);
   Tag? findTagByName(String name, {String? namespace}) =>
@@ -1767,12 +1877,16 @@ class AppState extends ChangeNotifier {
       tags.toggleTagOnImage(imageId, tag);
   Future<void> addTagToFolder(int folderId, Tag tag) =>
       tags.addTagToFolder(folderId, tag);
-  Future<void> addTagsToFolder(int folderId, List<Tag> list,
-          {bool recursive = false}) =>
-      tags.addTagsToFolder(folderId, list, recursive: recursive);
-  Future<void> removeTagsFromFolder(int folderId, List<Tag> list,
-          {bool recursive = false}) =>
-      tags.removeTagsFromFolder(folderId, list, recursive: recursive);
+  Future<void> addTagsToFolder(
+    int folderId,
+    List<Tag> list, {
+    bool recursive = false,
+  }) => tags.addTagsToFolder(folderId, list, recursive: recursive);
+  Future<void> removeTagsFromFolder(
+    int folderId,
+    List<Tag> list, {
+    bool recursive = false,
+  }) => tags.removeTagsFromFolder(folderId, list, recursive: recursive);
   Future<Set<int>> collectFolderTrackIds(int folderId) =>
       tags.collectFolderTrackIds(folderId);
   Future<void> addTagsToTracks(Iterable<int> trackIds, List<Tag> list) =>
@@ -1781,13 +1895,18 @@ class AppState extends ChangeNotifier {
       tags.removeTagsFromTracks(trackIds, list);
   Future<Set<int>> getTagIdsOnTracks(Iterable<int> trackIds) =>
       tags.getTagIdsOnTracks(trackIds);
-  Future<Tag> createTag(String name,
-          {String namespace = '', String color = '#cba6f7'}) =>
-      tags.createTag(name, namespace: namespace, color: color);
+  Future<Tag> createTag(
+    String name, {
+    String namespace = '',
+    String color = '#cba6f7',
+  }) => tags.createTag(name, namespace: namespace, color: color);
   Future<void> deleteTag(int tagId) => tags.deleteTag(tagId);
-  Future<void> updateTag(int tagId, String name,
-          {String? namespace, String? color}) =>
-      tags.updateTag(tagId, name, namespace: namespace, color: color);
+  Future<void> updateTag(
+    int tagId,
+    String name, {
+    String? namespace,
+    String? color,
+  }) => tags.updateTag(tagId, name, namespace: namespace, color: color);
 
   // 图片与视频的批量标签：媒体行统一写 `media_tags`，接口名保留旧写法。
   Future<void> addTagsToImages(Iterable<int> mediaIds, List<Tag> list) =>
@@ -1870,8 +1989,10 @@ class AppState extends ChangeNotifier {
   ///
   /// 图片与视频行不进来：专辑只装音频，双击视频是外链、双击图片是阅读。
   Future<List<TrackItem>> audioQueueInDir(String dirPath) async {
-    final rows =
-        await _mediaDao.queryDirectInDir(dirPath, type: MediaType.audio);
+    final rows = await _mediaDao.queryDirectInDir(
+      dirPath,
+      type: MediaType.audio,
+    );
     if (rows.isEmpty) return const <TrackItem>[];
     final ids = _sortImages(rows).map((m) => m.id).whereType<int>().toList();
     if (ids.isEmpty) return const <TrackItem>[];
@@ -1950,7 +2071,10 @@ class AppState extends ChangeNotifier {
   /// [type] 决定推哪些行：多媒体作品只推视频，音频作品推音频。图片进系统播放
   /// 器没有意义；要求的类型一行都没有时直接失败，让调用方提示用户。
   Future<LaunchResult> _launchExternal(
-      String title, List<String> dirPaths, MediaType type) async {
+    String title,
+    List<String> dirPaths,
+    MediaType type,
+  ) async {
     if (dirPaths.isEmpty) return LaunchResult.failed;
     final rows = await _mediaDao.queryByDirs(dirPaths, type: type);
     if (rows.isEmpty) return LaunchResult.failed;
@@ -1961,7 +2085,10 @@ class AppState extends ChangeNotifier {
       entries: [
         for (final m in rows)
           PlaylistEntry(
-              path: m.path, title: m.title ?? m.filename, durationMs: m.durationMs),
+            path: m.path,
+            title: m.title ?? m.filename,
+            durationMs: m.durationMs,
+          ),
       ],
     );
     return _launcher.open(file);
@@ -1977,8 +2104,7 @@ class AppState extends ChangeNotifier {
     required int startMs,
     required int endMs,
     String? name,
-  }) =>
-      playback.addSegment(startMs: startMs, endMs: endMs, name: name);
+  }) => playback.addSegment(startMs: startMs, endMs: endMs, name: name);
 
   Future<void> renameSegment(MediaSegment seg, String? name) =>
       playback.renameSegment(seg, name);
@@ -2004,7 +2130,9 @@ class AppState extends ChangeNotifier {
     final p = track.subtitlePath;
     if (p == null || p.isEmpty) return SubtitleDocument.empty;
     return _subtitleCache.putIfAbsent(
-        track.path, () => SubtitleParser.parseFile(p));
+      track.path,
+      () => SubtitleParser.parseFile(p),
+    );
   }
 
   Future<void> replaceSubtitle(int trackId, String newPath) async {
@@ -2012,9 +2140,7 @@ class AppState extends ChangeNotifier {
     _subtitleCache.clear();
     // 更新内存中的曲目
     library.tracks = library.tracks
-        .map((t) => t.id == trackId
-            ? t.copyWith(subtitlePath: newPath)
-            : t)
+        .map((t) => t.id == trackId ? t.copyWith(subtitlePath: newPath) : t)
         .toList();
     notifyListeners();
   }
@@ -2149,7 +2275,8 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadRecentTracks() => playback.loadRecent();
 
-  Future<void> playRecentTracks(int startIndex) => playback.playRecent(startIndex);
+  Future<void> playRecentTracks(int startIndex) =>
+      playback.playRecent(startIndex);
 
   // ═══════════════ 封面缓存管理（转发到 CoverState）═══════════════
 

@@ -48,14 +48,17 @@ class SettingsPage extends StatelessWidget {
               '左栏 ${appState.leftWidth.round()} 像素，作品集 ${appState.libraryHeight.round()} 像素；'
               '恢复为 260 与 200。也可以双击分隔条。',
               style: TextStyle(
-                  fontSize: 11, color: AppColors.textSecondaryOf(context)),
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
             ),
             trailing: const Icon(Icons.restart_alt, size: 18),
             onTap: () async {
               await appState.resetLayoutSizes();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('布局已恢复默认')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('布局已恢复默认')));
               }
             },
           ),
@@ -70,8 +73,9 @@ class SettingsPage extends StatelessWidget {
             onTap: () async {
               await SettingsService.instance.clearExpressionHistory();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已清除表达式历史')));
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('已清除表达式历史')));
               }
             },
           ),
@@ -87,7 +91,9 @@ class SettingsPage extends StatelessWidget {
               builder: (context, snap) => Text(
                 '${_fmtMB(snap.data ?? 0)} MB',
                 style: TextStyle(
-                    fontSize: 11, color: AppColors.textSecondaryOf(context)),
+                  fontSize: 11,
+                  color: AppColors.textSecondaryOf(context),
+                ),
               ),
             ),
           ),
@@ -101,7 +107,8 @@ class SettingsPage extends StatelessWidget {
               final freed = await appState.clearCoverCache();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已清理，释放 ${_fmtMB(freed)} MB')));
+                  SnackBar(content: Text('已清理，释放 ${_fmtMB(freed)} MB')),
+                );
               }
             },
           ),
@@ -119,8 +126,80 @@ class SettingsPage extends StatelessWidget {
               '封面缓存与缩略图缓存共用同一份上限配额，键为 settings.json 的 '
               'cover_cache_mb；0 表示不限制。',
               style: TextStyle(
-                  fontSize: 11, color: AppColors.mutedOf(context), height: 1.4),
+                fontSize: 11,
+                color: AppColors.mutedOf(context),
+                height: 1.4,
+              ),
             ),
+          ),
+          const Divider(height: 1),
+
+          // ── 自动导入 ──
+          const _SectionHeader('自动导入'),
+          SwitchListTile(
+            key: const ValueKey('auto-import-enabled'),
+            secondary: const Icon(Icons.sync_outlined, size: 18),
+            title: const Text('启动时自动导入'),
+            subtitle: Text(
+              appState.autoImportRoot == null
+                  ? '先选根目录。每部作品放在根目录下的一个子目录里。'
+                  : '启动后扫描根目录，新作品自动入库；已入库的按跳过处理。',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            value: appState.autoImportEnabled,
+            onChanged: (v) async {
+              await appState.setAutoImportEnabled(v);
+              if (v && appState.autoImportRoot == null && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('还要再选一个根目录，自动导入才会生效')),
+                );
+              }
+            },
+          ),
+          ListTile(
+            key: const ValueKey('auto-import-root'),
+            leading: const Icon(Icons.folder_open_outlined, size: 18),
+            title: const Text('自动导入根目录'),
+            subtitle: Text(
+              appState.autoImportRoot ?? '未选择',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () async {
+              final dir = await pickDirectory(title: '选择自动导入的根目录');
+              if (dir == null) return;
+              await appState.setAutoImportRoot(dir);
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('根目录已保存')));
+              }
+            },
+          ),
+          ListTile(
+            key: const ValueKey('auto-import-now'),
+            leading: const Icon(Icons.playlist_add_check_outlined, size: 18),
+            title: const Text('立即扫描一次'),
+            subtitle: Text(
+              appState.lastAutoImportAt == null
+                  ? '还没有自动导入过'
+                  : '上次导入：${_fmtDateTime(appState.lastAutoImportAt!)}',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            enabled: appState.autoImportRoot != null,
+            onTap: () => _runAutoImportNow(context, appState),
           ),
           const Divider(height: 1),
 
@@ -134,7 +213,9 @@ class SettingsPage extends StatelessWidget {
               builder: (context, snap) => Text(
                 snap.data ?? '...',
                 style: TextStyle(
-                    fontSize: 11, color: AppColors.textSecondaryOf(context)),
+                  fontSize: 11,
+                  color: AppColors.textSecondaryOf(context),
+                ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -157,9 +238,9 @@ class SettingsPage extends StatelessWidget {
             title: const Text('关于 AsmrShelf'),
             subtitle: const Text('版本、开源许可证、第三方声明、数据与日志目录'),
             trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const AboutPage()),
-            ),
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: (_) => const AboutPage())),
           ),
           const SizedBox(height: 24),
         ],
@@ -171,8 +252,9 @@ class SettingsPage extends StatelessWidget {
   Widget _themeSelector(BuildContext context, AppState appState) {
     Widget option(String key, String label, IconData icon, ThemeMode mode) {
       final selected = appState.themeMode == mode;
-      final color =
-          selected ? AppColors.accent : AppColors.mutedLightOf(context);
+      final color = selected
+          ? AppColors.accent
+          : AppColors.mutedLightOf(context);
       return Expanded(
         child: InkWell(
           key: ValueKey(key),
@@ -216,8 +298,12 @@ class SettingsPage extends StatelessWidget {
         padding: const EdgeInsets.all(4),
         child: Row(
           children: [
-            option('theme-system', '跟随系统', Icons.brightness_auto,
-                ThemeMode.system),
+            option(
+              'theme-system',
+              '跟随系统',
+              Icons.brightness_auto,
+              ThemeMode.system,
+            ),
             option('theme-light', '浅色', Icons.light_mode, ThemeMode.light),
             option('theme-dark', '深色', Icons.dark_mode, ThemeMode.dark),
           ],
@@ -239,8 +325,9 @@ class SettingsPage extends StatelessWidget {
           ? SubtitleStyle.luminanceOfCover(cover)
           : Future<double?>.value(),
       builder: (context, snap) {
-        final effective =
-            auto ? SubtitleStyle.autoInactiveOpacity(snap.data) : fixed;
+        final effective = auto
+            ? SubtitleStyle.autoInactiveOpacity(snap.data)
+            : fixed;
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Column(
@@ -249,16 +336,21 @@ class SettingsPage extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text('非当前句的透明度',
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textPrimaryOf(context))),
+                    child: Text(
+                      '非当前句的透明度',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textPrimaryOf(context),
+                      ),
+                    ),
                   ),
                   Text(
                     '${(effective * 100).round()}%',
                     key: const ValueKey('subtitle-opacity-value'),
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
@@ -286,8 +378,10 @@ class SettingsPage extends StatelessWidget {
               ),
               Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceOf(context),
                   borderRadius: BorderRadius.circular(8),
@@ -296,21 +390,23 @@ class SettingsPage extends StatelessWidget {
                   '不在当前句上的歌词就长这样',
                   key: const ValueKey('subtitle-opacity-preview'),
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: effective),
-                      fontSize: 14),
+                    color: Colors.white.withValues(alpha: effective),
+                    fontSize: 14,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
               Text(
                 auto
                     ? '自动：按当前音轨封面（加了模糊滤镜的那张）的明暗算。'
-                        '封面越亮，字越实；没有封面时用 '
-                        '${(SubtitleStyle.defaultInactiveOpacity * 100).round()}%。'
+                          '封面越亮，字越实；没有封面时用 '
+                          '${(SubtitleStyle.defaultInactiveOpacity * 100).round()}%。'
                     : '固定：滑到别的句子上时用这个透明度。',
                 style: TextStyle(
-                    fontSize: 11,
-                    color: AppColors.mutedOf(context),
-                    height: 1.4),
+                  fontSize: 11,
+                  color: AppColors.mutedOf(context),
+                  height: 1.4,
+                ),
               ),
             ],
           ),
@@ -331,15 +427,21 @@ class SettingsPage extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text('滑动后留在原地',
-                    style: TextStyle(
-                        fontSize: 13, color: AppColors.textPrimaryOf(context))),
+                child: Text(
+                  '滑动后留在原地',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textPrimaryOf(context),
+                  ),
+                ),
               ),
               Text(
                 '$seconds 秒',
                 key: const ValueKey('subtitle-resume-value'),
-                style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
@@ -348,7 +450,8 @@ class SettingsPage extends StatelessWidget {
             value: seconds.toDouble(),
             min: SettingsService.minSubtitleResumeSeconds.toDouble(),
             max: SettingsService.maxSubtitleResumeSeconds.toDouble(),
-            divisions: SettingsService.maxSubtitleResumeSeconds -
+            divisions:
+                SettingsService.maxSubtitleResumeSeconds -
                 SettingsService.minSubtitleResumeSeconds,
             label: '$seconds 秒',
             onChanged: (v) => appState.setSubtitleResumeSeconds(v.round()),
@@ -356,7 +459,10 @@ class SettingsPage extends StatelessWidget {
           Text(
             '这段时间内不会自动回到正在播放的那一句，方便往回看。',
             style: TextStyle(
-                fontSize: 11, color: AppColors.mutedOf(context), height: 1.4),
+              fontSize: 11,
+              color: AppColors.mutedOf(context),
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -386,7 +492,9 @@ class SettingsPage extends StatelessWidget {
             Text(
               '${appState.gridColumns} 列',
               style: TextStyle(
-                  fontSize: 11, color: AppColors.textSecondaryOf(context)),
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
             ),
           ],
         ),
@@ -406,8 +514,7 @@ class SettingsPage extends StatelessWidget {
           Text(
             '${appState.gridColumns}',
             key: const ValueKey('grid-columns-value'),
-            style: const TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           ),
           IconButton(
             key: const ValueKey('grid-columns-increase'),
@@ -473,9 +580,13 @@ class SettingsPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('视图模式',
-              style: TextStyle(
-                  fontSize: 12, color: AppColors.textSecondaryOf(context))),
+          Text(
+            '视图模式',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondaryOf(context),
+            ),
+          ),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -497,8 +608,10 @@ class SettingsPage extends StatelessWidget {
       title: const Text('缓存上限（封面 + 缩略图）'),
       subtitle: Text(
         appState.cacheSizeMB == 0 ? '当前不限制' : '当前 ${appState.cacheSizeMB} MB',
-        style:
-            TextStyle(fontSize: 11, color: AppColors.textSecondaryOf(context)),
+        style: TextStyle(
+          fontSize: 11,
+          color: AppColors.textSecondaryOf(context),
+        ),
       ),
       trailing: DropdownButton<int>(
         key: const ValueKey('cache-limit-dropdown'),
@@ -515,9 +628,27 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  /// 立即按根目录导一次，把结果说清楚。
+  Future<void> _runAutoImportNow(
+    BuildContext context,
+    AppState appState,
+  ) async {
+    final outcome = await appState.autoImportFromRoot();
+    if (!context.mounted) return;
+    final message = outcome == null
+        ? '目录不可用，或已有导入正在进行'
+        : '扫描完成：新建 ${outcome.worksCreated} 部作品，'
+              '新增 ${outcome.tracksInserted} 首曲目';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   /// 清空磁盘缩略图缓存 + 内存缓存，并让在屏卡片重新生成缩略图。
   Future<void> _clearThumbnailCache(
-      BuildContext context, AppState appState) async {
+    BuildContext context,
+    AppState appState,
+  ) async {
     final service = ThumbnailService.instance;
     var removed = 0;
     try {
@@ -532,9 +663,13 @@ class SettingsPage extends StatelessWidget {
     appState.markThumbnailsCleared();
     if (context.mounted) {
       final failed = removed == 0;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(failed ? '缩略图缓存已清空（没有可删除的文件）' : '已清理缩略图缓存：$removed 个文件'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            failed ? '缩略图缓存已清空（没有可删除的文件）' : '已清理缩略图缓存：$removed 个文件',
+          ),
+        ),
+      );
     }
   }
 }
@@ -547,16 +682,27 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.accent)),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: AppColors.accent,
+        ),
+      ),
     );
   }
 }
 
 String _fmtMB(int bytes) => (bytes / 1024 / 1024).toStringAsFixed(1);
+
+/// 毫秒时间戳 → `2026-11-02 17:05`，只给「上次导入」用。
+String _fmtDateTime(int millis) {
+  final t = DateTime.fromMillisecondsSinceEpoch(millis);
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${t.year}-${two(t.month)}-${two(t.day)} '
+      '${two(t.hour)}:${two(t.minute)}';
+}
 
 /// 缓存上限下拉可选的 MB 值。
 ///
@@ -591,13 +737,15 @@ Future<void> _migrateDataDir(BuildContext context, AppState appState) async {
     await appState.migrateDataDir(dir);
   } catch (e) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('迁移失败：$e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('迁移失败：$e')));
     }
     return;
   }
   if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('数据已迁移到：$dir')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('数据已迁移到：$dir')));
   }
 }

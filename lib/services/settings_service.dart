@@ -50,7 +50,9 @@ class SettingsService {
     final f = await _file();
     // 先写临时文件，再改名。读者要么看到完整旧内容，要么看到完整新内容。
     await writeFileAtomic(
-        f, (tmp) => tmp.writeAsString(jsonEncode(_data), flush: true));
+      f,
+      (tmp) => tmp.writeAsString(jsonEncode(_data), flush: true),
+    );
   }
 
   /// 清空内存状态并重置保存链，仅供测试。
@@ -196,7 +198,9 @@ class SettingsService {
     final list = expressionHistory.where((e) => e != expr).toList();
     list.insert(0, expr);
     final cap = maxExprCacheCount;
-    _data['expr_history'] = cap <= 0 ? const <String>[] : list.take(cap).toList();
+    _data['expr_history'] = cap <= 0
+        ? const <String>[]
+        : list.take(cap).toList();
     await _save();
   }
 
@@ -219,6 +223,41 @@ class SettingsService {
 
   Future<void> setAutoCoverBackfillDone(bool done) async {
     _data['auto_cover_backfill_done'] = done;
+    await _save();
+  }
+
+  // ── 自动导入 ──
+  /// 启动时是否自动扫描下面的根目录，把新作品导进来。
+  bool get autoImportEnabled =>
+      (_data['auto_import_enabled'] as bool?) ?? false;
+
+  Future<void> setAutoImportEnabled(bool enabled) async {
+    _data['auto_import_enabled'] = enabled;
+    await _save();
+  }
+
+  /// 自动导入的根目录。每部作品占一个子目录，与手动「导入目录」同一套扫描。
+  String? get autoImportRoot {
+    final v = _data['auto_import_root'] as String?;
+    if (v == null || v.trim().isEmpty) return null;
+    return v;
+  }
+
+  Future<void> setAutoImportRoot(String? root) async {
+    final v = root?.trim();
+    if (v == null || v.isEmpty) {
+      _data.remove('auto_import_root');
+    } else {
+      _data['auto_import_root'] = v;
+    }
+    await _save();
+  }
+
+  /// 上一次自动导入的时间（毫秒时间戳），没有跑过时为 null。
+  int? get lastAutoImportAt => _data['last_auto_import_at'] as int?;
+
+  Future<void> setLastAutoImportAt(int millis) async {
+    _data['last_auto_import_at'] = millis;
     await _save();
   }
 
@@ -245,20 +284,36 @@ class SettingsService {
   static const double maxLibraryHeight = 480;
 
   double get leftWidth => _clampDouble(
-      _data['layout_left_width'], defaultLeftWidth, minLeftWidth, maxLeftWidth);
+    _data['layout_left_width'],
+    defaultLeftWidth,
+    minLeftWidth,
+    maxLeftWidth,
+  );
 
   Future<void> setLeftWidth(double width) async {
-    _data['layout_left_width'] =
-        _clampDouble(width, defaultLeftWidth, minLeftWidth, maxLeftWidth);
+    _data['layout_left_width'] = _clampDouble(
+      width,
+      defaultLeftWidth,
+      minLeftWidth,
+      maxLeftWidth,
+    );
     await _save();
   }
 
-  double get libraryHeight => _clampDouble(_data['layout_library_height'],
-      defaultLibraryHeight, minLibraryHeight, maxLibraryHeight);
+  double get libraryHeight => _clampDouble(
+    _data['layout_library_height'],
+    defaultLibraryHeight,
+    minLibraryHeight,
+    maxLibraryHeight,
+  );
 
   Future<void> setLibraryHeight(double height) async {
     _data['layout_library_height'] = _clampDouble(
-        height, defaultLibraryHeight, minLibraryHeight, maxLibraryHeight);
+      height,
+      defaultLibraryHeight,
+      minLibraryHeight,
+      maxLibraryHeight,
+    );
     await _save();
   }
 
@@ -333,19 +388,23 @@ class SettingsService {
   }
 
   Future<void> setSubtitleInactiveOpacity(double value) async {
-    _data['subtitle_inactive_opacity'] =
-        SubtitleStyle.clampInactiveOpacity(value);
+    _data['subtitle_inactive_opacity'] = SubtitleStyle.clampInactiveOpacity(
+      value,
+    );
     await _save();
   }
 
   /// 滑动之后留在原地的秒数：这段时间内不自动回到正在播放的那一句。
   int get subtitleResumeSeconds =>
-      ((_data['subtitle_resume_seconds'] as int?) ?? defaultSubtitleResumeSeconds)
+      ((_data['subtitle_resume_seconds'] as int?) ??
+              defaultSubtitleResumeSeconds)
           .clamp(minSubtitleResumeSeconds, maxSubtitleResumeSeconds);
 
   Future<void> setSubtitleResumeSeconds(int seconds) async {
-    _data['subtitle_resume_seconds'] =
-        seconds.clamp(minSubtitleResumeSeconds, maxSubtitleResumeSeconds);
+    _data['subtitle_resume_seconds'] = seconds.clamp(
+      minSubtitleResumeSeconds,
+      maxSubtitleResumeSeconds,
+    );
     await _save();
   }
 
