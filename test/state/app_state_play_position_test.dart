@@ -123,6 +123,31 @@ void main() {
     expect(await positionOf(track.id!), 9000);
   });
 
+  test('暂停时立即落盘，不等 5 秒节流', () async {
+    final track = await seedTrack();
+
+    // 不到一个节流步长：正常播放中不会写
+    state.player.onPositionChanged!(track, const Duration(seconds: 4));
+    await settle();
+    expect(await positionOf(track.id!), 0);
+
+    // 用户按暂停：最后位置要立刻保存
+    state.player.onPlaybackPaused!(track, const Duration(seconds: 4));
+    await settle();
+    expect(await positionOf(track.id!), 4000);
+    expect(state.tracks.single.playPositionMs, 4000);
+  });
+
+  test('最近播放卡片上的进度跟着暂停保存刷新', () async {
+    final track = await seedTrack();
+    state.playback.recentTracks = [track];
+
+    state.player.onPlaybackPaused!(track, const Duration(seconds: 4));
+    await settle();
+
+    expect(state.playback.recentTracks.single.playPositionMs, 4000);
+  });
+
   test('一首播到结尾位置清零，下次从头播', () async {
     final track = await seedTrack(playPositionMs: 83000);
 

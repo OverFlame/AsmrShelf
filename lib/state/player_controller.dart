@@ -95,6 +95,9 @@ class PlayerController extends ChangeNotifier {
   /// 播放中的位置变化（约每 250 毫秒一次，暂停时不报）
   void Function(TrackItem track, Duration position)? onPositionChanged;
 
+  /// 暂停或手动停止时立即上报最后位置，不等 5 秒落盘节流。
+  void Function(TrackItem track, Duration position)? onPlaybackPaused;
+
   /// 一首正常播完、即将切下一首时回调
   void Function(TrackItem track)? onTrackCompleted;
 
@@ -315,7 +318,20 @@ class PlayerController extends ChangeNotifier {
     if (_handle == null) return;
     _engine.setPause(_handle!, true);
     _playing = false;
+    _reportPausedPosition();
     notifyListeners();
+  }
+
+  /// 立即把当前位置交给上层落盘；手动暂停/停止时不等 5 秒节流。
+  void _reportPausedPosition() {
+    final h = _handle;
+    if (h == null || !hasTrack) return;
+    try {
+      _position = _engine.getPosition(h);
+    } catch (_) {
+      // 句柄失效时沿用最后一次 ticker 记下的位置
+    }
+    onPlaybackPaused?.call(_queue[_index], _position);
   }
 
   Future<void> resume() async {
@@ -346,8 +362,8 @@ class PlayerController extends ChangeNotifier {
     } else if (_repeat == RepeatMode.all) {
       _index = 0;
     } else {
-      // 列表播完且非循环：停在末尾
-      await stop();
+      // 列表播完且非循环：停在末尾；结尾位置已由 onTrackCompleted 清零
+      await stop(flush: false);
       return;
     }
     await _loadAndPlay();
@@ -390,7 +406,7 @@ class PlayerController extends ChangeNotifier {
     _orderPos++;
     if (_orderPos >= _order.length) {
       if (_repeat == RepeatMode.off) {
-        await stop();
+        await stop(flush: false);
         return false;
       }
       _rebuildOrder(anchorCurrent: false);
@@ -631,7 +647,8 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> stop() async {
+  Future<void> stop({bool flush = true}) async {
+    if (flush) _reportPausedPosition();
     _loadGen++; // 使进行中的加载失效，避免停止后又冒出声音
     await _disposeCurrent();
     _playing = false;

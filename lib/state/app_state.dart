@@ -452,6 +452,7 @@ class AppState extends ChangeNotifier {
     player.onTrackStarted = playback.onTrackStarted;
     player.resumeFrom = playback.resumeOf;
     player.onPositionChanged = playback.onPosition;
+    player.onPlaybackPaused = playback.onPlaybackPaused;
     player.onTrackCompleted = playback.onTrackCompleted;
     player.onRepeatModeChanged = _persistRepeatMode;
     player.onShuffleChanged = _persistShuffle;

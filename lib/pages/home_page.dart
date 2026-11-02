@@ -941,19 +941,36 @@ class _RecentBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final tracks = appState.recentTracks;
     return SizedBox(
-      height: 122,
+      height: 128,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Text(
-              '最近播放',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimaryOf(context),
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 2),
+            child: Row(
+              children: [
+                Text(
+                  '最近播放',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimaryOf(context),
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  key: const ValueKey('continue-last-playback'),
+                  onPressed: () => appState.playRecentTracks(0),
+                  icon: const Icon(Icons.play_arrow, size: 16),
+                  label: const Text('继续播放', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.accent,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
             ),
           ),
           Expanded(
@@ -963,6 +980,10 @@ class _RecentBar extends StatelessWidget {
               itemCount: tracks.length,
               itemBuilder: (ctx, i) {
                 final t = tracks[i];
+                final duration = t.durationMs ?? 0;
+                final progress = duration > 0
+                    ? (t.playPositionMs / duration).clamp(0.0, 1.0).toDouble()
+                    : 0.0;
                 return InkWell(
                   onTap: () => appState.playRecentTracks(i),
                   child: SizedBox(
@@ -972,11 +993,32 @@ class _RecentBar extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          CoverImage(
-                            path: t.coverPath,
-                            width: 72,
-                            height: 72,
-                            borderRadius: 8,
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Stack(
+                              children: [
+                                CoverImage(
+                                  path: t.coverPath,
+                                  width: 72,
+                                  height: 72,
+                                  borderRadius: 8,
+                                ),
+                                if (progress > 0)
+                                  Positioned(
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    child: LinearProgressIndicator(
+                                      value: progress,
+                                      minHeight: 3,
+                                      backgroundColor: Colors.black45,
+                                      valueColor: const AlwaysStoppedAnimation(
+                                        AppColors.accent,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 4),
                           Text(

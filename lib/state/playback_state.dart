@@ -188,6 +188,13 @@ class PlaybackState extends ChangeNotifier {
     savePosition(id, position.inMilliseconds);
   }
 
+  /// 暂停/手动停止时立即写最后位置，避免丢掉节流窗口内的几秒。
+  void onPlaybackPaused(TrackItem track, Duration position) {
+    final id = track.id;
+    if (id == null) return;
+    savePosition(id, position.inMilliseconds);
+  }
+
   /// 一首播到结尾：位置清零，下次从头播。
   void onTrackCompleted(TrackItem track) {
     final id = track.id;
@@ -217,8 +224,21 @@ class PlaybackState extends ChangeNotifier {
         next.add(track);
       }
     }
-    if (!changed) return;
-    onTracksChanged(next);
+    var recentChanged = false;
+    final nextRecent = <TrackItem>[];
+    for (final track in recentTracks) {
+      if (track.id == mediaId && track.playPositionMs != positionMs) {
+        recentChanged = true;
+        nextRecent.add(track.copyWith(playPositionMs: positionMs));
+      } else {
+        nextRecent.add(track);
+      }
+    }
+    if (recentChanged) {
+      recentTracks = nextRecent;
+      notifyListeners();
+    }
+    if (changed) onTracksChanged(next);
   }
 
   // ═══════════════ 最近播放 ═══════════════
