@@ -270,3 +270,11 @@
 |---|---|
 | `flutter analyze --no-fatal-infos` | 无问题 |
 | `flutter test` | 541 例全过 |
+
+## 2026-11-02 元数据 DAO
+
+`lib/db/work_metadata_dao.dart`：`WorkMetadata` 模型 + `WorkMetadataDao`，方法 `getByWork`、`getByRjCode`（不区分大小写，落库统一大写）、`upsert`（只补传进来的字段）、`setCover`（只动封面三列，行不存在时补一行）、`delete`。
+
+一处必须记住的判定：`upsert` 不用 `ConflictAlgorithm.replace`。RJ 号是唯一索引，替换会静默顶掉别的作品那一行，变成「抓 A 顺手把 B 的编号抢过来」。改成显式分插入与更新，撞唯一索引就让调用方看见 `DatabaseException`。`test/db/work_metadata_dao_test.dart` 5 例覆盖，含「两个作品不能抢同一个 RJ 号」。
+
+验证：analyze 无问题、`flutter test` 546 例全过。
