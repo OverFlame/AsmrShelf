@@ -12,6 +12,7 @@ import '../db/tag_dao.dart';
 import '../db/track_dao.dart';
 import '../db/work_dao.dart';
 import '../db/work_metadata_dao.dart';
+import '../services/auto_import_scanner.dart';
 import '../services/cover_finder.dart';
 import '../services/data_dir_service.dart';
 import '../services/file_scanner.dart';
@@ -1539,11 +1540,18 @@ class AppState extends ChangeNotifier {
 
   // ═══════════════ 自动导入 ═══════════════
 
-  /// 启动时是否自动扫描 [autoImportRoot]。
+  /// 启动时是否自动扫描 [autoImportRoots]。
   bool get autoImportEnabled => SettingsService.instance.autoImportEnabled;
 
-  /// 自动导入的根目录。每部作品占一个子目录。
+  /// 自动导入的根目录列表。每部作品占一个子目录。
+  List<String> get autoImportRoots => SettingsService.instance.autoImportRoots;
+
+  /// 第一个根目录，兼容旧调用点。
   String? get autoImportRoot => SettingsService.instance.autoImportRoot;
+
+  /// 用户标记为「不要导入」的目录。
+  List<String> get autoImportIgnored =>
+      SettingsService.instance.autoImportIgnored;
 
   /// 上一次自动导入的时间（毫秒时间戳）。没跑过为 null。
   int? get lastAutoImportAt => SettingsService.instance.lastAutoImportAt;
@@ -1558,24 +1566,127 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 按设置里的根目录导一次。没配目录、目录不存在或已有导入在跑都返回 null。
+  Future<void> addAutoImportRoot(String root) async {
+    await SettingsService.instance.addAutoImportRoot(root);
+    notifyListeners();
+  }
+
+  Future<void> removeAutoImportRoot(String root) async {
+    await SettingsService.instance.removeAutoImportRoot(root);
+    notifyListeners();
+  }
+
+  Future<void> setAutoImportIgnored(Iterable<String> dirs) async {
+    await SettingsService.instance.setAutoImportIgnored(dirs);
+    notifyListeners();
+  }
+
+  Future<void> clearAutoImportIgnored() => setAutoImportIgnored(const []);
+
+  /// 扫一遍所有根目录，返回待确认的候选。只读，不落库。
+  Future<List<AutoImportCandidate>> scanAutoImportCandidates() {
+    return AutoImportScanner(DatabaseManager.instance.db).scan(
+      roots: autoImportRoots,
+      ignored: autoImportIgnored,
+    );
+  }
+
+  /// 落库用户勾选的候选：新建作品走导入计划，有新文件的作品走按盘刷新。
+  ///
+  /// 没有任何可导入项时返回空结果；导入闸门被占时返回 null。
+  Future<ImportOutcome?> applyAutoImportCandidates(
+    Iterable<AutoImportCandidate> candidates,
+  ) async {
+    final selected = candidates.where((c) => c.selectable).toList();
+    if (selected.isEmpty) return const ImportOutcome();
+    if (!_beginImport('applyAutoImportCandidates')) return null;
+    try {
+      var created = 0;
+      var skipped = 0;
+      var inserted = 0;
+      var insertedSkipped = 0;
+      for (final c in selected) {
+        if (c.state == AutoImportState.newWork) {
+          final work = await planImportWork(c.dirPath);
+          if (work == null) {
+            skipped++;
+            continue;
+          }
+          final outcome = await PlanImporter(DatabaseManager.instance.db).apply(
+            ImportPlan(rootPath: c.dirPath, works: [work]),
+          );
+          created += outcome.worksCreated;
+          skipped += outcome.worksSkipped;
+          inserted += outcome.tracksInserted;
+          insertedSkipped += outcome.tracksSkipped;
+        } else if (c.state == AutoImportState.newTracks &&
+            c.workId != null) {
+          final work = await _workDao.getById(c.workId!);
+          if (work == null) {
+            skipped++;
+            continue;
+          }
+          final rescan = await _rescanOneWork(work);
+          inserted += rescan.added;
+        }
+      }
+      if (created > 0 || inserted > 0) {
+        await SettingsService.instance.setLastAutoImportAt(
+          DateTime.now().millisecondsSinceEpoch,
+        );
+      }
+      await refresh();
+      logInfo(
+        'AppState',
+        '确认导入：新建 $created 部，新增 $inserted 首，跳过 $skipped 部',
+      );
+      return ImportOutcome(
+        worksCreated: created,
+        worksSkipped: skipped,
+        tracksInserted: inserted,
+        tracksSkipped: insertedSkipped,
+      );
+    } finally {
+      _endImport();
+    }
+  }
+
+  /// 按设置里的所有根目录导一次。没配目录、目录都不存在或已有导入在跑都返回 null。
   ///
   /// 与手动「导入目录」走同一条 [importWorksFromRoot] 路径，已存在的作品
   /// 与曲目按跳过处理，所以可以每次启动都跑。
   Future<ImportOutcome?> autoImportFromRoot() async {
-    final root = autoImportRoot;
-    if (root == null) return null;
-    if (!await Directory(root).exists()) {
-      logWarn('AppState', '自动导入目录不存在，跳过：$root');
-      return null;
+    final roots = autoImportRoots;
+    if (roots.isEmpty) return null;
+    var created = 0;
+    var skipped = 0;
+    var inserted = 0;
+    var tracksSkipped = 0;
+    var ran = false;
+    for (final root in roots) {
+      if (!await Directory(root).exists()) {
+        logWarn('AppState', '自动导入目录不存在，跳过：$root');
+        continue;
+      }
+      final outcome = await importWorksFromRoot(root);
+      if (outcome == null) continue;
+      ran = true;
+      created += outcome.worksCreated;
+      skipped += outcome.worksSkipped;
+      inserted += outcome.tracksInserted;
+      tracksSkipped += outcome.tracksSkipped;
     }
-    final outcome = await importWorksFromRoot(root);
-    if (outcome == null) return null;
+    if (!ran) return null;
     await SettingsService.instance.setLastAutoImportAt(
       DateTime.now().millisecondsSinceEpoch,
     );
     notifyListeners();
-    return outcome;
+    return ImportOutcome(
+      worksCreated: created,
+      worksSkipped: skipped,
+      tracksInserted: inserted,
+      tracksSkipped: tracksSkipped,
+    );
   }
 
   /// 启动时调用一次。开关关着时什么都不做。

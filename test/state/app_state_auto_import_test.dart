@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'package:asmrshelf/db/database.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
+import 'package:asmrshelf/services/auto_import_scanner.dart';
 import 'package:asmrshelf/services/settings_service.dart';
 import 'package:asmrshelf/state/app_state.dart';
 import 'package:asmrshelf/state/player_controller.dart';
@@ -118,5 +119,45 @@ void main() {
 
     await state.setAutoImportRoot(null);
     expect(SettingsService.instance.autoImportRoot, isNull);
+  });
+
+  test('多个根目录一起导，每个根目录下的作品都进库', () async {
+    final r1 = Directory(p.join(tmp.path, '库一'))..createSync();
+    final r2 = Directory(p.join(tmp.path, '库二'))..createSync();
+    File(p.join((Directory(p.join(r1.path, '作品A'))..createSync()).path,
+            '01.mp3'))
+        .writeAsBytesSync(const [0, 1]);
+    File(p.join((Directory(p.join(r2.path, '作品B'))..createSync()).path,
+            '01.mp3'))
+        .writeAsBytesSync(const [0, 1]);
+    await state.addAutoImportRoot(r1.path);
+    await state.addAutoImportRoot(r2.path);
+
+    final outcome = await state.autoImportFromRoot();
+    expect(outcome!.worksCreated, 2);
+    expect(state.autoImportRoots, [r1.path, r2.path]);
+    expect(await workCount(), 2);
+  });
+
+  test('扫描候选：新建、无变化，落库后变无变化；忽略的目录标出来', () async {
+    final root = await seedRoot();
+    await state.setAutoImportRoot(root.path);
+    final dir = p.join(root.path, '作品A');
+
+    var list = await state.scanAutoImportCandidates();
+    expect(list.single.state, AutoImportState.newWork);
+
+    final outcome = await state.applyAutoImportCandidates(list);
+    expect(outcome!.worksCreated, 1);
+    expect(await workCount(), 1);
+    expect(state.lastAutoImportAt, isNotNull);
+
+    list = await state.scanAutoImportCandidates();
+    expect(list.single.state, AutoImportState.unchanged);
+
+    await state.setAutoImportIgnored([dir]);
+    list = await state.scanAutoImportCandidates();
+    expect(list.single.state, AutoImportState.ignored);
+    expect(SettingsService.instance.autoImportIgnored, [dir]);
   });
 }

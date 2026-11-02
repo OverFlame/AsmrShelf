@@ -173,6 +173,25 @@ Future<ImportPlan> scanImportTree(
   return ImportPlan(rootPath: rootPath, works: works, skipped: skipped);
 }
 
+/// 单独整理一部作品目录。给「扫描并确认」这类先看清单、后落库的流程用。
+///
+/// 目录读不了或一首音频都没有时返回 null。
+Future<ImportWork?> planImportWork(
+  String dirPath, {
+  bool writeCover = true,
+  CoverFinder? finder,
+}) async {
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) return null;
+  try {
+    final plan = await _planWork(dir, finder: finder, writeCover: writeCover);
+    if (plan.tracks.isEmpty) return null;
+    return plan;
+  } catch (_) {
+    return null;
+  }
+}
+
 Future<ImportWork> _planWork(
   Directory dir, {
   CoverFinder? finder,

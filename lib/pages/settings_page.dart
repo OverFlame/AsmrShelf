@@ -7,6 +7,7 @@ import '../services/thumbnail_cache.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/log_util.dart';
+import '../widgets/auto_import_dialog.dart';
 import '../widgets/dialogs.dart';
 import 'about_page.dart';
 
@@ -141,8 +142,8 @@ class SettingsPage extends StatelessWidget {
             secondary: const Icon(Icons.sync_outlined, size: 18),
             title: const Text('启动时自动导入'),
             subtitle: Text(
-              appState.autoImportRoot == null
-                  ? '先选根目录。每部作品放在根目录下的一个子目录里。'
+              appState.autoImportRoots.isEmpty
+                  ? '先加一个根目录。每部作品放在根目录下的一个子目录里。'
                   : '启动后扫描根目录，新作品自动入库；已入库的按跳过处理。',
               style: TextStyle(
                 fontSize: 11,
@@ -152,37 +153,72 @@ class SettingsPage extends StatelessWidget {
             value: appState.autoImportEnabled,
             onChanged: (v) async {
               await appState.setAutoImportEnabled(v);
-              if (v && appState.autoImportRoot == null && context.mounted) {
+              if (v && appState.autoImportRoots.isEmpty && context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('还要再选一个根目录，自动导入才会生效')),
+                  const SnackBar(content: Text('还要再加一个根目录，自动导入才会生效')),
                 );
               }
             },
           ),
+          for (var i = 0; i < appState.autoImportRoots.length; i++)
+            ListTile(
+              key: ValueKey('auto-import-root-$i'),
+              leading: const Icon(Icons.folder_open_outlined, size: 18),
+              title: Text(appState.autoImportRoots[i]),
+              subtitle: Text(
+                '第 ${i + 1} 个根目录',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textSecondaryOf(context),
+                ),
+              ),
+              trailing: IconButton(
+                key: ValueKey('auto-import-root-remove-$i'),
+                tooltip: '移除这个根目录',
+                icon: const Icon(Icons.remove_circle_outline, size: 18),
+                onPressed: () =>
+                    appState.removeAutoImportRoot(appState.autoImportRoots[i]),
+              ),
+            ),
           ListTile(
-            key: const ValueKey('auto-import-root'),
-            leading: const Icon(Icons.folder_open_outlined, size: 18),
-            title: const Text('自动导入根目录'),
+            key: const ValueKey('auto-import-root-add'),
+            leading: const Icon(Icons.add_outlined, size: 18),
+            title: const Text('添加自动导入根目录'),
             subtitle: Text(
-              appState.autoImportRoot ?? '未选择',
+              appState.autoImportRoots.isEmpty
+                  ? '还没有根目录'
+                  : '已添加 ${appState.autoImportRoots.length} 个',
               style: TextStyle(
                 fontSize: 11,
                 color: AppColors.textSecondaryOf(context),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
             trailing: const Icon(Icons.chevron_right, size: 18),
             onTap: () async {
               final dir = await pickDirectory(title: '选择自动导入的根目录');
               if (dir == null) return;
-              await appState.setAutoImportRoot(dir);
+              await appState.addAutoImportRoot(dir);
               if (context.mounted) {
                 ScaffoldMessenger.of(
                   context,
                 ).showSnackBar(const SnackBar(content: Text('根目录已保存')));
               }
             },
+          ),
+          ListTile(
+            key: const ValueKey('auto-import-scan'),
+            leading: const Icon(Icons.fact_check_outlined, size: 18),
+            title: const Text('扫描并确认…'),
+            subtitle: Text(
+              '先列出新建、有新增、无变化、已忽略、读不了的目录，勾选后再导入',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            enabled: appState.autoImportRoots.isNotEmpty,
+            onTap: () => _scanAutoImport(context, appState),
           ),
           ListTile(
             key: const ValueKey('auto-import-now'),
@@ -198,8 +234,29 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             trailing: const Icon(Icons.chevron_right, size: 18),
-            enabled: appState.autoImportRoot != null,
+            enabled: appState.autoImportRoots.isNotEmpty,
             onTap: () => _runAutoImportNow(context, appState),
+          ),
+          ListTile(
+            key: const ValueKey('auto-import-ignored'),
+            leading: const Icon(Icons.visibility_off_outlined, size: 18),
+            title: const Text('已忽略的目录'),
+            subtitle: Text(
+              appState.autoImportIgnored.isEmpty
+                  ? '没有忽略任何目录'
+                  : '${appState.autoImportIgnored.length} 个，扫描时不再提示',
+              style: TextStyle(
+                fontSize: 11,
+                color: AppColors.textSecondaryOf(context),
+              ),
+            ),
+            trailing: appState.autoImportIgnored.isEmpty
+                ? null
+                : TextButton(
+                    key: const ValueKey('auto-import-clear-ignored'),
+                    onPressed: () => appState.clearAutoImportIgnored(),
+                    child: const Text('清空'),
+                  ),
           ),
           const Divider(height: 1),
 
@@ -629,6 +686,38 @@ class SettingsPage extends StatelessWidget {
   }
 
   /// 立即按根目录导一次，把结果说清楚。
+  /// 扫描候选 → 对话框确认 → 落库 + 记忽略。
+  Future<void> _scanAutoImport(
+    BuildContext context,
+    AppState appState,
+  ) async {
+    final candidates = await appState.scanAutoImportCandidates();
+    if (!context.mounted) return;
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('根目录下没有找到作品目录')),
+      );
+      return;
+    }
+    final decision = await showAutoImportDialog(context, candidates: candidates);
+    if (decision == null) return;
+    if (decision.ignored.isNotEmpty) {
+      await appState.setAutoImportIgnored([
+        ...appState.autoImportIgnored,
+        ...decision.ignored,
+      ]);
+    }
+    final outcome = await appState.applyAutoImportCandidates(decision.selected);
+    if (!context.mounted) return;
+    final message = outcome == null
+        ? '已有导入正在进行，稍后再试'
+        : '导入完成：新建 ${outcome.worksCreated} 部作品，'
+              '新增 ${outcome.tracksInserted} 首曲目';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _runAutoImportNow(
     BuildContext context,
     AppState appState,

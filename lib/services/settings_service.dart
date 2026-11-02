@@ -236,22 +236,84 @@ class SettingsService {
     await _save();
   }
 
-  /// 自动导入的根目录。每部作品占一个子目录，与手动「导入目录」同一套扫描。
-  String? get autoImportRoot {
+  /// 自动导入的根目录列表。每部作品占一个子目录，与手动「导入目录」同一套扫描。
+  ///
+  /// 旧版本只有一个根目录（[auto_import_root]），这里继续兼容：列表为空时
+  /// 回退到旧键，旧值也当作唯一根目录。
+  List<String> get autoImportRoots {
+    final stored = (_data['auto_import_roots'] as List?)
+        ?.whereType<String>()
+        .where((e) => e.trim().isNotEmpty)
+        .toList();
+    if (stored != null && stored.isNotEmpty) return stored;
+    final legacy = _legacyAutoImportRoot;
+    return legacy == null ? const [] : [legacy];
+  }
+
+  String? get _legacyAutoImportRoot {
     final v = _data['auto_import_root'] as String?;
     if (v == null || v.trim().isEmpty) return null;
     return v;
   }
 
-  Future<void> setAutoImportRoot(String? root) async {
-    final v = root?.trim();
-    if (v == null || v.isEmpty) {
-      _data.remove('auto_import_root');
+  Future<void> setAutoImportRoots(Iterable<String> roots) async {
+    final cleaned = <String>[];
+    for (final raw in roots) {
+      final v = raw.trim();
+      if (v.isEmpty || cleaned.contains(v)) continue;
+      cleaned.add(v);
+    }
+    _data.remove('auto_import_root');
+    if (cleaned.isEmpty) {
+      _data.remove('auto_import_roots');
     } else {
-      _data['auto_import_root'] = v;
+      _data['auto_import_roots'] = cleaned;
     }
     await _save();
   }
+
+  Future<void> addAutoImportRoot(String root) =>
+      setAutoImportRoots([...autoImportRoots, root]);
+
+  Future<void> removeAutoImportRoot(String root) =>
+      setAutoImportRoots(autoImportRoots.where((e) => e != root));
+
+  /// 第一个根目录，兼容旧调用点。
+  String? get autoImportRoot {
+    final roots = autoImportRoots;
+    return roots.isEmpty ? null : roots.first;
+  }
+
+  Future<void> setAutoImportRoot(String? root) async {
+    await setAutoImportRoots(root == null ? const [] : [root]);
+  }
+
+  /// 用户标记为「不要导入」的目录。按绝对路径整段比较。
+  List<String> get autoImportIgnored =>
+      ((_data['auto_import_ignored'] as List?) ?? const [])
+          .whereType<String>()
+          .toList();
+
+  Future<void> setAutoImportIgnored(Iterable<String> dirs) async {
+    final cleaned = <String>[];
+    for (final raw in dirs) {
+      final v = raw.trim();
+      if (v.isEmpty || cleaned.contains(v)) continue;
+      cleaned.add(v);
+    }
+    if (cleaned.isEmpty) {
+      _data.remove('auto_import_ignored');
+    } else {
+      _data['auto_import_ignored'] = cleaned;
+    }
+    await _save();
+  }
+
+  Future<void> addAutoImportIgnored(String dir) =>
+      setAutoImportIgnored([...autoImportIgnored, dir]);
+
+  Future<void> removeAutoImportIgnored(String dir) =>
+      setAutoImportIgnored(autoImportIgnored.where((e) => e != dir));
 
   /// 上一次自动导入的时间（毫秒时间戳），没有跑过时为 null。
   int? get lastAutoImportAt => _data['last_auto_import_at'] as int?;
