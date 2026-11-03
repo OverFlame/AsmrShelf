@@ -489,15 +489,29 @@ class FolderBrowser extends StatelessWidget {
       );
     }
 
-    return ListView(
+    final showHeader = work != null;
+    final showDivider = folders.isNotEmpty && tracks.isNotEmpty;
+    final itemCount = (showHeader ? 1 : 0) +
+        folders.length +
+        (showDivider ? 1 : 0) +
+        tracks.length;
+    return ListView.builder(
       padding: const EdgeInsets.only(bottom: 8),
-      children: [
-        if (work != null) _WorkHeader(work: work),
-        for (final f in folders) _FolderTile(folder: f),
-        if (folders.isNotEmpty && tracks.isNotEmpty) const Divider(height: 1),
-        for (int i = 0; i < tracks.length; i++)
-          _TrackTile(track: tracks[i], index: i),
-      ],
+      itemCount: itemCount,
+      itemBuilder: (context, index) {
+        var i = index;
+        if (showHeader) {
+          if (i == 0) return _WorkHeader(work: work);
+          i--;
+        }
+        if (i < folders.length) return _FolderTile(folder: folders[i]);
+        i -= folders.length;
+        if (showDivider) {
+          if (i == 0) return const Divider(height: 1);
+          i--;
+        }
+        return _TrackTile(track: tracks[i], index: i);
+      },
     );
   }
 }

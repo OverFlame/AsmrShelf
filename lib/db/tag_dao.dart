@@ -211,18 +211,24 @@ class TagDao {
 
   Future<Map<int, List<Tag>>> getTagsForTracks(List<int> trackIds) async {
     if (trackIds.isEmpty) return {};
-    final placeholders = trackIds.map((_) => '?').join(',');
-    final rows = await _db.rawQuery('''
-      SELECT tt.media_id, t.*
-      FROM media_tags tt
-      INNER JOIN tags t ON t.id = tt.tag_id
-      WHERE tt.media_id IN ($placeholders)
-      ORDER BY t.namespace, t.name
-    ''', trackIds);
     final map = <int, List<Tag>>{};
-    for (final row in rows) {
-      final tid = row['media_id'] as int;
-      map.putIfAbsent(tid, () => []).add(Tag.fromMap(row));
+    // SQLite 的变量上限是 999；这里每个 id 只占一个占位符，仍按 500 分批，
+    // 给以后可能追加的其他参数留余量。
+    for (var start = 0; start < trackIds.length; start += 500) {
+      final batch = trackIds.sublist(
+          start, start + 500 > trackIds.length ? trackIds.length : start + 500);
+      final placeholders = batch.map((_) => '?').join(',');
+      final rows = await _db.rawQuery('''
+        SELECT tt.media_id, t.*
+        FROM media_tags tt
+        INNER JOIN tags t ON t.id = tt.tag_id
+        WHERE tt.media_id IN ($placeholders)
+        ORDER BY t.namespace, t.name
+      ''', batch);
+      for (final row in rows) {
+        final tid = row['media_id'] as int;
+        map.putIfAbsent(tid, () => []).add(Tag.fromMap(row));
+      }
     }
     return map;
   }
@@ -376,8 +382,14 @@ class TagDao {
   Future<Set<int>> _getIdsByExpression(
       MediaType? type, String expression, List<Tag> allTags) async {
     final ast = FilterExpressionParser.parse(expression);
-    final sub =
-        buildTrackIdSubquery(ast, (ref) => _resolveTagRefSql(ref, allTags));
+    final scope = type == null
+        ? 'SELECT id FROM media'
+        : "SELECT id FROM media WHERE media_type = '${type.value}'";
+    final sub = buildTrackIdSubquery(
+      ast,
+      (ref) => _resolveTagRefSql(ref, allTags),
+      scope: scope,
+    );
     final rows = type == null
         ? await _db.rawQuery('SELECT id FROM media WHERE id IN ($sub)')
         : await _db.rawQuery(
@@ -389,19 +401,24 @@ class TagDao {
   /// 规则标签 id → 它对应的 media 列条件；普通标签不在结果里。
   Future<Map<int, String>> _ruleSqlByIds(Set<int> ids) async {
     if (ids.isEmpty) return const <int, String>{};
-    final ph = ids.map((_) => '?').join(',');
-    final rows = await _db.query(
-      'tags',
-      columns: ['id', 'namespace', 'name'],
-      where: 'id IN ($ph)',
-      whereArgs: ids.toList(),
-    );
     final out = <int, String>{};
-    for (final r in rows) {
-      final ns = r['namespace'] as String?;
-      if (ns == null || !ruleNamespaces.contains(ns)) continue;
-      final sql = ruleTagSql(TagRef('$ns:${r['name']}'));
-      if (sql != null) out[r['id'] as int] = sql;
+    final all = ids.toList();
+    for (var start = 0; start < all.length; start += 500) {
+      final batch = all.sublist(
+          start, start + 500 > all.length ? all.length : start + 500);
+      final ph = batch.map((_) => '?').join(',');
+      final rows = await _db.query(
+        'tags',
+        columns: ['id', 'namespace', 'name'],
+        where: 'id IN ($ph)',
+        whereArgs: batch,
+      );
+      for (final r in rows) {
+        final ns = r['namespace'] as String?;
+        if (ns == null || !ruleNamespaces.contains(ns)) continue;
+        final sql = ruleTagSql(TagRef('$ns:${r['name']}'));
+        if (sql != null) out[r['id'] as int] = sql;
+      }
     }
     return out;
   }
@@ -515,18 +532,22 @@ class TagDao {
 
   Future<Map<int, List<Tag>>> getTagsForFolders(List<int> folderIds) async {
     if (folderIds.isEmpty) return {};
-    final placeholders = folderIds.map((_) => '?').join(',');
-    final rows = await _db.rawQuery('''
-      SELECT ft.folder_id, t.*
-      FROM folder_tags ft
-      INNER JOIN tags t ON t.id = ft.tag_id
-      WHERE ft.folder_id IN ($placeholders)
-      ORDER BY t.namespace, t.name
-    ''', folderIds);
     final map = <int, List<Tag>>{};
-    for (final row in rows) {
-      final fid = row['folder_id'] as int;
-      map.putIfAbsent(fid, () => []).add(Tag.fromMap(row));
+    for (var start = 0; start < folderIds.length; start += 500) {
+      final batch = folderIds.sublist(
+          start, start + 500 > folderIds.length ? folderIds.length : start + 500);
+      final placeholders = batch.map((_) => '?').join(',');
+      final rows = await _db.rawQuery('''
+        SELECT ft.folder_id, t.*
+        FROM folder_tags ft
+        INNER JOIN tags t ON t.id = ft.tag_id
+        WHERE ft.folder_id IN ($placeholders)
+        ORDER BY t.namespace, t.name
+      ''', batch);
+      for (final row in rows) {
+        final fid = row['folder_id'] as int;
+        map.putIfAbsent(fid, () => []).add(Tag.fromMap(row));
+      }
     }
     return map;
   }
@@ -537,7 +558,9 @@ class TagDao {
         where: '''
       id NOT IN (SELECT DISTINCT tag_id FROM media_tags)
       AND id NOT IN (SELECT DISTINCT tag_id FROM folder_tags)
-    ''');
+      AND namespace NOT IN (?, ?)
+    ''',
+        whereArgs: [kindNamespace, extNamespace]);
     logInfo('TagDao', 'deleteOrphanTags: removed $count orphan(s)');
     return count;
   }

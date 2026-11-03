@@ -327,7 +327,7 @@ class TrackDao {
   }
 
   /// 一条 SQL 里的最大占位符数量，超过就分批查
-  static const int _queryBatchSize = 500;
+  static const int _queryBatchSize = 499;
 
 
   /// 分批查询后按同一列重排；单批时顺序仍由 SQLite 决定

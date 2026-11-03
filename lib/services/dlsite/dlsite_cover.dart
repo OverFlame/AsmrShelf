@@ -36,7 +36,8 @@ class DlsiteCoverDownloader {
     Future<DlsiteImage?> Function(Uri url)? fetch,
     this.maxBytes = 8 * 1024 * 1024,
     String Function()? proxy,
-  }) : _fetch = fetch ?? ((url) => fetchImageBytes(url, proxy: proxy));
+  }) : _fetch = fetch ??
+            ((url) => fetchImageBytes(url, maxBytes: maxBytes, proxy: proxy));
 
   /// 返回 null 表示响应 404 或不是图片。
   final Future<DlsiteImage?> Function(Uri url) _fetch;
@@ -77,6 +78,7 @@ class DlsiteCoverDownloader {
   /// 不传时每次请求都读设置页里保存的值。
   static Future<DlsiteImage?> fetchImageBytes(
     Uri url, {
+    int maxBytes = 8 * 1024 * 1024,
     String Function()? proxy,
   }) async {
     final client = HttpClient()
@@ -94,10 +96,15 @@ class DlsiteCoverDownloader {
         logWarn('DlsiteCover', '下载封面失败: HTTP ${res.statusCode} $url');
         return null;
       }
-      final bytes = await res.fold<BytesBuilder>(
-        BytesBuilder(copy: false),
-        (b, chunk) => b..add(chunk),
-      );
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in res.timeout(const Duration(seconds: 30))) {
+        if (bytes.length + chunk.length > maxBytes) {
+          logWarn('DlsiteCover', '封面图超过 $maxBytes 字节，已中止: $url');
+          // 提前结束 await-for 会取消底层订阅，不再把剩余响应读进内存。
+          return null;
+        }
+        bytes.add(chunk);
+      }
       return DlsiteImage(
         bytes: bytes.takeBytes(),
         contentType: res.headers.contentType?.mimeType ?? '',

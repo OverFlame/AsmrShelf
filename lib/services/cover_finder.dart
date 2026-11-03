@@ -186,13 +186,14 @@ class CoverFinder {
     await walk(dir, 0);
     // 不递归时也要能只取本层
     if (maxDepth == 0) {
-      return [
+      final files = [
         for (final e in await dir.list(followLinks: false).toList())
           if (e is File &&
               coverImageExtensions.contains(
                   p.extension(e.path).toLowerCase().substring(1)))
             e.path,
       ];
+      return files.take(maxImages).toList();
     }
     return out;
   }

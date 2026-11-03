@@ -76,6 +76,22 @@ void main() {
     expect(row.circle, '社团');
   });
 
+
+  test('RJ 号写入去掉空白并统一大写', () async {
+    await dao.upsert(WorkMetadata(workId: workId, rjCode: '  rj294126  '));
+    expect((await dao.getByWork(workId))!.rjCode, 'RJ294126');
+  });
+
+  test('并发 upsert 同一作品不会互相覆盖成半行', () async {
+    await Future.wait([
+      dao.upsert(WorkMetadata(workId: workId, title: '标题 A')),
+      dao.upsert(WorkMetadata(workId: workId, circle: '社团 B')),
+    ]);
+    final row = (await dao.getByWork(workId))!;
+    expect(row.title, '标题 A');
+    expect(row.circle, '社团 B');
+  });
+
   test('setCover 在行不存在时补一行，只动封面三列', () async {
     await dao.setCover(workId,
         url: 'https://example.invalid/main.jpg',

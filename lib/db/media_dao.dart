@@ -129,7 +129,7 @@ class MediaDao {
   final Database _db;
   MediaDao(this._db);
 
-  static const int _batchSize = 500;
+  static const int _batchSize = 499;
 
   // ═══ 归一化工具 ═══
 

@@ -14,8 +14,45 @@ import '../widgets/dialogs.dart';
 import 'about_page.dart';
 
 /// 设置页
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  AppState? _appState;
+  Future<int>? _coverCacheSizeFuture;
+  Future<String>? _dataDirFuture;
+  String? _luminanceKey;
+  Future<double?>? _luminanceFuture;
+  static final Future<double?> _emptyLuminance = Future<double?>.value();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final app = context.read<AppState>();
+    if (!identical(app, _appState)) {
+      _appState = app;
+      _coverCacheSizeFuture = app.getCoverCacheSizeBytes();
+      _dataDirFuture = app.getDataDir();
+      _luminanceKey = null;
+      _luminanceFuture = null;
+    }
+  }
+
+  Future<double?> _luminanceFutureFor({
+    required bool auto,
+    required String? cover,
+  }) {
+    if (!auto || cover == null) return _emptyLuminance;
+    if (_luminanceKey != cover) {
+      _luminanceKey = cover;
+      _luminanceFuture = SubtitleStyle.luminanceOfCover(cover);
+    }
+    return _luminanceFuture!;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +170,8 @@ class SettingsPage extends StatelessWidget {
             leading: const Icon(Icons.image_outlined, size: 18),
             title: const Text('内嵌封面缓存'),
             subtitle: FutureBuilder<int>(
-              future: appState.getCoverCacheSizeBytes(),
+              future: _coverCacheSizeFuture ??=
+                  appState.getCoverCacheSizeBytes(),
               builder: (context, snap) => Text(
                 '${_fmtMB(snap.data ?? 0)} MB',
                 style: TextStyle(
@@ -343,7 +381,7 @@ class SettingsPage extends StatelessWidget {
             leading: const Icon(Icons.folder_outlined, size: 18),
             title: const Text('数据目录'),
             subtitle: FutureBuilder<String>(
-              future: appState.getDataDir(),
+              future: _dataDirFuture ??= appState.getDataDir(),
               builder: (context, snap) => Text(
                 snap.data ?? '...',
                 style: TextStyle(
@@ -360,7 +398,16 @@ class SettingsPage extends StatelessWidget {
             title: const Text('迁移数据目录'),
             subtitle: const Text('把数据库、封面缓存、设置整体迁移到其它位置'),
             trailing: const Icon(Icons.chevron_right, size: 18),
-            onTap: () => _migrateDataDir(context, appState),
+            onTap: () => _migrateDataDir(
+              context,
+              appState,
+              onMigrated: () {
+                if (!mounted) return;
+                setState(() {
+                  _dataDirFuture = appState.getDataDir();
+                });
+              },
+            ),
           ),
           ListTile(
             key: const ValueKey('backup-export'),
@@ -463,9 +510,7 @@ class SettingsPage extends StatelessWidget {
     final fixed = appState.subtitleInactiveOpacity;
     // 自动模式下列出当前曲目那张封面算出来的值，让用户看见调的是哪个数。
     return FutureBuilder<double?>(
-      future: auto && cover != null
-          ? SubtitleStyle.luminanceOfCover(cover)
-          : Future<double?>.value(),
+      future: _luminanceFutureFor(auto: auto, cover: cover),
       builder: (context, snap) {
         final effective = auto
             ? SubtitleStyle.autoInactiveOpacity(snap.data)
@@ -1003,7 +1048,11 @@ String _limitLabel(int mb) {
 }
 
 /// 迁移数据目录：选择新目录 → 确认 → 整体迁移 → 提示
-Future<void> _migrateDataDir(BuildContext context, AppState appState) async {
+Future<void> _migrateDataDir(
+  BuildContext context,
+  AppState appState, {
+  VoidCallback? onMigrated,
+}) async {
   final dir = await pickDirectory(title: '选择新的数据目录');
   if (dir == null) return;
   if (!context.mounted) return;
@@ -1023,6 +1072,7 @@ Future<void> _migrateDataDir(BuildContext context, AppState appState) async {
     }
     return;
   }
+  onMigrated?.call();
   if (context.mounted) {
     ScaffoldMessenger.of(
       context,

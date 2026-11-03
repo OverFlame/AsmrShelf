@@ -99,8 +99,18 @@ class PlaybackState extends ChangeNotifier {
     await reloadSegmentsFor(id);
   }
 
+  int _segmentGeneration = 0;
+
   Future<void> reloadSegmentsFor(int mediaId) async {
-    assignSegments(await segmentService().listByMedia(mediaId));
+    final generation = ++_segmentGeneration;
+    try {
+      final list = await segmentService().listByMedia(mediaId);
+      // 切歌后旧请求才回来的情况：结果已经不属于当前曲目，直接丢弃。
+      if (generation != _segmentGeneration) return;
+      assignSegments(list);
+    } catch (e, st) {
+      logError('PlaybackState', '载入选段失败: $e\n$st');
+    }
   }
 
   /// 列表真的变了才通知：切歌时顺带载入选段，不该多出无谓的重建。
@@ -167,7 +177,11 @@ class PlaybackState extends ChangeNotifier {
 
   void onTrackStarted(TrackItem track) {
     final id = track.id;
-    if (id == null) return;
+    if (id == null) {
+      _segmentGeneration++;
+      assignSegments(const []);
+      return;
+    }
     unawaited(reloadSegmentsFor(id));
     final gen = ++_recentLoadGeneration;
     unawaited(trackDao().recordPlay(id, DateTime.now().millisecondsSinceEpoch).then(

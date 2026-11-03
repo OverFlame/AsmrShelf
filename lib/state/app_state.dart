@@ -1958,6 +1958,10 @@ class AppState extends ChangeNotifier {
   /// 标志必须在第一个 await 之前置上：两次导入同时进来时，第二次要在这里就被挡住，
   /// 不能等 `_runImport` 里再判断。
   bool _beginImport(String caller) {
+    if (_migrating) {
+      logInfo('AppState', '数据目录迁移中，拒绝导入: $caller');
+      return false;
+    }
     if (!importState.begin(caller)) return false;
     notifyListeners();
     return true;
@@ -2716,6 +2720,38 @@ class AppState extends ChangeNotifier {
     final work = library.currentWork?.coverPath;
     if (work != null) keep.add(work);
     return keep;
+  }
+
+  bool _disposed = false;
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    final children = <ChangeNotifier>[
+      settings,
+      tags,
+      covers,
+      dlsite,
+      playback,
+      library,
+    ];
+    for (final child in children) {
+      child.removeListener(notifyListeners);
+    }
+    subtitleOverlay.removeListener(notifyListeners);
+    subtitleOverlay.dispose();
+    for (final child in children) {
+      child.dispose();
+    }
+    player.dispose();
+    super.dispose();
   }
 }
 

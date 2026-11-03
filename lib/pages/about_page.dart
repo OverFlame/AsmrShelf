@@ -11,7 +11,7 @@ import '../theme/app_theme.dart';
 ///
 /// 内容从 PictureViewer2 的 about_page.dart 并入，配色改成本仓库的
 /// [AppColors]，并补上许可证、第三方声明与数据/日志目录入口。
-class AboutPage extends StatelessWidget {
+class AboutPage extends StatefulWidget {
   const AboutPage({super.key, this.launcher});
 
   /// 打开目录用的启动器。测试注入假实现，避免真的拉起文件管理器。
@@ -32,6 +32,16 @@ class AboutPage extends StatelessWidget {
   static const String noticesFileName = 'THIRD_PARTY_NOTICES.md';
 
   @override
+  State<AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<AboutPage> {
+  final Map<bool, Future<String>> _dirFutures = <bool, Future<String>>{};
+
+  Future<String> _dirFuture({required bool log}) =>
+      _dirFutures.putIfAbsent(log, () => _resolveDir(context, log: log));
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('关于')),
@@ -45,8 +55,8 @@ class AboutPage extends StatelessWidget {
           _dlsiteNotice(context),
           const SizedBox(height: 20),
           const Divider(height: 1),
-          _infoRow(context, '应用', appName),
-          _infoRow(context, '版本', 'v$appVersion+$appBuildNumber'),
+          _infoRow(context, '应用', AboutPage.appName),
+          _infoRow(context, '版本', 'v${AboutPage.appVersion}+${AboutPage.appBuildNumber}'),
           _infoRow(context, '框架', 'Flutter'),
           _infoRow(context, '数据库', 'SQLite (sqflite)'),
           _infoRow(context, '开发语言', 'Dart'),
@@ -62,8 +72,8 @@ class AboutPage extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right, size: 18),
             onTap: () => showLicensePage(
               context: context,
-              applicationName: appName,
-              applicationVersion: 'v$appVersion+$appBuildNumber',
+              applicationName: AboutPage.appName,
+              applicationVersion: 'v${AboutPage.appVersion}+${AboutPage.appBuildNumber}',
               applicationLegalese: 'AsmrShelf — 本地媒体库',
             ),
           ),
@@ -115,7 +125,7 @@ class AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Text(
-          appName,
+          AboutPage.appName,
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -124,7 +134,7 @@ class AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'v$appVersion+$appBuildNumber',
+          'v${AboutPage.appVersion}+${AboutPage.appBuildNumber}',
           style: TextStyle(
             fontSize: 12,
             color: AppColors.mutedLightOf(context),
@@ -211,7 +221,7 @@ class AboutPage extends StatelessWidget {
       leading: Icon(icon, size: 18),
       title: Text(title),
       subtitle: FutureBuilder<String>(
-        future: _resolveDir(context, log: isLog),
+        future: _dirFuture(log: isLog),
         builder: (context, snap) => Text(
           snap.data == null ? '$hint\n...' : '$hint\n${snap.data}',
           style: TextStyle(
@@ -251,7 +261,7 @@ class AboutPage extends StatelessWidget {
       }
       return;
     }
-    final result = await (launcher ?? VideoLauncher()).open(dir);
+    final result = await (widget.launcher ?? VideoLauncher()).open(dir);
     if (!context.mounted) return;
     final msg = switch (result) {
       LaunchResult.ok => '已用系统文件管理器打开：$dir',
@@ -275,7 +285,7 @@ class AboutPage extends StatelessWidget {
           children: [
             Text(
               '本应用使用的第三方开源组件及其许可证与版权声明，收录在源码根目录的 '
-              '$noticesFileName。',
+              '${AboutPage.noticesFileName}。',
               style: TextStyle(
                 fontSize: 13,
                 color: AppColors.textSecondaryOf(ctx),
@@ -303,12 +313,12 @@ class AboutPage extends StatelessWidget {
             FilledButton(
               onPressed: () async {
                 final messenger = ScaffoldMessenger.of(ctx);
-                final result = await (launcher ?? VideoLauncher()).open(
+                final result = await (widget.launcher ?? VideoLauncher()).open(
                   file.path,
                 );
                 final msg = result == LaunchResult.ok
-                    ? '已用系统默认程序打开 $noticesFileName'
-                    : '打开 $noticesFileName 失败';
+                    ? '已用系统默认程序打开 ${AboutPage.noticesFileName}'
+                    : '打开 ${AboutPage.noticesFileName} 失败';
                 messenger.showSnackBar(SnackBar(content: Text(msg)));
               },
               child: const Text('打开文件'),
@@ -321,8 +331,8 @@ class AboutPage extends StatelessWidget {
   /// 找 [noticesFileName]：先看当前工作目录，再看可执行文件所在目录。
   File? _locateNoticesFile() {
     final candidates = <String>[
-      p.join(Directory.current.path, noticesFileName),
-      p.join(File(Platform.resolvedExecutable).parent.path, noticesFileName),
+      p.join(Directory.current.path, AboutPage.noticesFileName),
+      p.join(File(Platform.resolvedExecutable).parent.path, AboutPage.noticesFileName),
     ];
     for (final path in candidates) {
       final f = File(path);

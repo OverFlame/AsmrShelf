@@ -22,11 +22,11 @@ class _FakeProcess implements Process {
 }
 
 void main() {
-  test('平台分派表：Windows 用 start，Linux 用 xdg-open，其他不执行', () {
+  test('平台分派表：Windows 用 explorer，Linux 用 xdg-open，其他不执行', () {
     final win = VideoLauncher.commandFor('/m/列表.m3u8', 'windows');
     expect(win, isNotNull);
-    expect(win!.$1, 'cmd');
-    expect(win.$2, ['/c', 'start', '', '/m/列表.m3u8']);
+    expect(win!.$1, 'explorer.exe');
+    expect(win.$2, ['/m/列表.m3u8']);
 
     final linux = VideoLauncher.commandFor('/m/列表.m3u8', 'linux');
     expect(linux, isNotNull);
@@ -34,6 +34,25 @@ void main() {
     expect(linux.$2, ['/m/列表.m3u8']);
 
     expect(VideoLauncher.commandFor('/m/列表.m3u8', 'other'), isNull);
+  });
+
+
+  test('Windows 路径作为独立参数交给 explorer，不经 shell 解析', () async {
+    final calls = <List<String>>[];
+    final launcher = VideoLauncher(
+      os: 'windows',
+      start: (exe, args) async {
+        calls.add([exe, ...args]);
+        // explorer.exe 打开成功也常返回 1；不能据此报失败。
+        return _FakeProcess(code: 1);
+      },
+    );
+
+    const path = r'D:\ASMR\A&B^C%TEMP%\列表.m3u8';
+    expect(await launcher.open(path), LaunchResult.ok);
+    expect(calls, [
+      ['explorer.exe', path]
+    ]);
   });
 
   test('Linux 下把路径交给 xdg-open 并返回 ok', () async {

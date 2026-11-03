@@ -102,29 +102,35 @@ class WorkMetadataDao {
   /// 撞唯一索引就让调用方看见错误。
   Future<void> upsert(WorkMetadata meta) async {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final existing = await getByWork(meta.workId);
-    final merged = WorkMetadata(
-      workId: meta.workId,
-      rjCode: meta.rjCode ?? existing?.rjCode,
-      title: meta.title ?? existing?.title,
-      titleKana: meta.titleKana ?? existing?.titleKana,
-      circle: meta.circle ?? existing?.circle,
-      series: meta.series ?? existing?.series,
-      description: meta.description ?? existing?.description,
-      coverUrl: meta.coverUrl ?? existing?.coverUrl,
-      coverSource: meta.coverSource ?? existing?.coverSource,
-      coverFetchedAt: meta.coverFetchedAt ?? existing?.coverFetchedAt,
-      rawJson: meta.rawJson ?? existing?.rawJson,
-      fetchedAt: meta.fetchedAt ?? existing?.fetchedAt,
-      updatedAt: now,
-    );
-    if (existing == null) {
-      await db.insert('work_metadata', merged.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.abort);
-    } else {
-      await db.update('work_metadata', merged.toMap(),
-          where: 'work_id = ?', whereArgs: [meta.workId]);
-    }
+    await db.transaction((txn) async {
+      final rows = await txn.query('work_metadata',
+          where: 'work_id = ?', whereArgs: [meta.workId], limit: 1);
+      final existing =
+          rows.isEmpty ? null : WorkMetadata.fromMap(rows.first);
+      final code = (meta.rjCode ?? existing?.rjCode)?.trim().toUpperCase();
+      final merged = WorkMetadata(
+        workId: meta.workId,
+        rjCode: code == null || code.isEmpty ? null : code,
+        title: meta.title ?? existing?.title,
+        titleKana: meta.titleKana ?? existing?.titleKana,
+        circle: meta.circle ?? existing?.circle,
+        series: meta.series ?? existing?.series,
+        description: meta.description ?? existing?.description,
+        coverUrl: meta.coverUrl ?? existing?.coverUrl,
+        coverSource: meta.coverSource ?? existing?.coverSource,
+        coverFetchedAt: meta.coverFetchedAt ?? existing?.coverFetchedAt,
+        rawJson: meta.rawJson ?? existing?.rawJson,
+        fetchedAt: meta.fetchedAt ?? existing?.fetchedAt,
+        updatedAt: now,
+      );
+      if (existing == null) {
+        await txn.insert('work_metadata', merged.toMap(),
+            conflictAlgorithm: ConflictAlgorithm.abort);
+      } else {
+        await txn.update('work_metadata', merged.toMap(),
+            where: 'work_id = ?', whereArgs: [meta.workId]);
+      }
+    });
   }
 
   /// 只写封面三列，抓封面与抓标题互不覆盖。

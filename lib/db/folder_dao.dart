@@ -183,14 +183,25 @@ class FolderDao {
     final list = ids.toSet().toList();
     if (list.isEmpty) return 0;
     return _db.transaction((txn) async {
-      final ph = List.filled(list.length, '?').join(',');
+      // 原实现把同一批 id 拼进两条 IN，占位符是 2N；500 个文件夹就撞上
+      // SQLite 的 999 上限。临时表让占位符数量与 N 脱钩。
+      await txn.execute(
+          'CREATE TEMP TABLE IF NOT EXISTS _folder_delete_ids '
+          '(id INTEGER PRIMARY KEY)');
+      await txn.delete('_folder_delete_ids');
+      for (final id in list) {
+        await txn.insert('_folder_delete_ids', {'id': id},
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+
       // 集合外的子级上移为根级。正常调用不会出现（[ids] 闭合），保险用。
       await txn.rawUpdate(
-          'UPDATE folders SET parent = NULL WHERE parent IN ($ph) '
-          'AND id NOT IN ($ph)',
-          [...list, ...list]);
-      final rows = await txn.query('folders',
-          columns: ['id', 'parent'], where: 'id IN ($ph)', whereArgs: list);
+          'UPDATE folders SET parent = NULL '
+          'WHERE parent IN (SELECT id FROM _folder_delete_ids) '
+          'AND id NOT IN (SELECT id FROM _folder_delete_ids)');
+      final rows = await txn.rawQuery(
+          'SELECT id, parent FROM folders '
+          'WHERE id IN (SELECT id FROM _folder_delete_ids)');
       final parentOf = <int, int?>{
         for (final r in rows) r['id'] as int: r['parent'] as int?,
       };
@@ -211,6 +222,7 @@ class FolderDao {
       for (final id in ordered) {
         deleted += await txn.delete('folders', where: 'id = ?', whereArgs: [id]);
       }
+      await txn.delete('_folder_delete_ids');
       logInfo('FolderDao',
           'Deleted ${list.length} folder(s) in subtree (affected $deleted row(s))');
       return deleted;

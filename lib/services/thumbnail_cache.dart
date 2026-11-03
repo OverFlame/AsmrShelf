@@ -278,8 +278,12 @@ class ThumbnailService {
     final diskPath = await ensureThumbnail(originalPath, size: size);
     final bytes = await File(diskPath).readAsBytes();
     final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    final image = frame.image;
+    final ui.Image image;
+    try {
+      image = (await codec.getNextFrame()).image;
+    } finally {
+      codec.dispose();
+    }
 
     _memoryCache.put(cacheKey, image);
     return image;

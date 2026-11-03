@@ -37,5 +37,16 @@ void main() {
       expect(sql, contains("media_type = 'audio'"));
       expect(sql, contains('AND id IN'));
     });
+
+    test('图片筛选使用图片作用域，不把规则标签拉回音频', () {
+      final ast = FilterExpressionParser.parse('风景&&!kind:audio');
+      final sql = buildTrackIdSubquery(
+        ast,
+        (ref) => tagIdsSubquery([1, 2]),
+        scope: "SELECT id FROM media WHERE media_type = 'image'",
+      );
+      expect(sql, contains("media_type = 'image'"));
+      expect(sql, isNot(contains("media_type = 'audio'")));
+    });
   });
 }

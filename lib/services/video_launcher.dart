@@ -64,7 +64,8 @@ class VideoLauncher {
   /// 桌面平台分派表。Android 走 Intent，认不出平台时返回 null。
   static (String, List<String>)? commandFor(String path, String os) =>
       switch (os) {
-        'windows' => ('cmd', <String>['/c', 'start', '', path]),
+        // explorer.exe 接收的是独立参数，路径里的 & ^ % 不会被 cmd 解释。
+        'windows' => ('explorer.exe', <String>[path]),
         'linux' => ('xdg-open', <String>[path]),
         _ => null,
       };
@@ -104,7 +105,8 @@ class VideoLauncher {
     }
     try {
       final proc = await _start(cmd.$1, cmd.$2);
-      final code = await _exitCodeOrNull(proc);
+      // explorer.exe 即使成功打开也常返回 1，Windows 上不看退出码。
+      final code = _os == 'windows' ? null : await _exitCodeOrNull(proc);
       if (code != null && code != 0) {
         logWarn('Launch',
             '外部播放器立刻退出（退出码 $code）：${cmd.$1} ${cmd.$2.join(' ')}');

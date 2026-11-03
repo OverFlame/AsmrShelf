@@ -177,8 +177,8 @@ class MigrationGuard {
   /// 只能在 [DatabaseManager.init] 之前调用：此时应用没有库连接，
   /// 替换文件不会被正在运行的 SQLite 连接看到。
   ///
-  /// 顺序不能反：先删 `-wal` / `-shm`，再替换主库。旧 WAL 若留到替换之后，
-  /// SQLite 下次打开会把旧页套到新文件上，库直接坏掉。
+  /// 旧 `-wal` / `-shm` 先改名藏起来，主库替换成功后才删除。旧 WAL 若留到
+  /// 替换之后，SQLite 下次打开会把旧页套到新文件上，库直接坏掉。
   Future<int> restore(String backupPath) async {
     final dir = await DataDirService.instance.dataDir;
     final dbPath = p.join(dir, 'asmr_shelf.db');
@@ -197,19 +197,55 @@ class MigrationGuard {
       await check.close();
     }
 
-    for (final suffix in const ['-wal', '-shm']) {
-      final side = File('$dbPath$suffix');
-      if (await side.exists()) await side.delete();
-    }
+    // 不能先删 -wal/-shm：主库替换失败时，旧 WAL 里已提交但未 checkpoint
+    // 的事务会永久丢失。先改名藏起来，主库替换成功后再删；失败则改回原名。
+    final movedSidecars = <String, String>{};
+    var mainReplaced = false;
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    try {
+      for (final suffix in const ['-wal', '-shm']) {
+        final side = File('$dbPath$suffix');
+        if (!await side.exists()) continue;
+        final hidden = '$dbPath$suffix.restore-$stamp';
+        await side.rename(hidden);
+        movedSidecars[side.path] = hidden;
+      }
 
-    await writeFileAtomic(File(dbPath), (tmp) async {
-      await src.copy(tmp.path);
-    });
+      await writeFileAtomic(File(dbPath), (tmp) async {
+        await src.copy(tmp.path);
+      });
+      mainReplaced = true;
 
-    final bytes = await src.length();
-    final restored = await File(dbPath).length();
-    if (restored != bytes) {
-      throw StateError('还原校验失败，字节数 $restored != $bytes: $dbPath');
+      final bytes = await src.length();
+      final restored = await File(dbPath).length();
+      if (restored != bytes) {
+        throw StateError('还原校验失败，字节数 $restored != $bytes: $dbPath');
+      }
+
+      for (final hidden in movedSidecars.values) {
+        final file = File(hidden);
+        if (await file.exists()) await file.delete();
+      }
+    } catch (e) {
+      if (!mainReplaced) {
+        // 主库还是旧的，把原来的 -wal/-shm 放回去，上一会话的事务仍可用。
+        for (final entry in movedSidecars.entries) {
+          final hidden = File(entry.value);
+          if (!await hidden.exists()) continue;
+          final original = File(entry.key);
+          if (await original.exists()) await original.delete();
+          await hidden.rename(entry.key);
+        }
+      } else {
+        // 主库已经换成新文件，旧 WAL 绝不能再套回去；尽力清掉隐藏文件。
+        for (final hidden in movedSidecars.values) {
+          try {
+            final file = File(hidden);
+            if (await file.exists()) await file.delete();
+          } catch (_) {}
+        }
+      }
+      rethrow;
     }
 
     logInfo('Migration', '已把备份 ${src.path} 还原到 $dbPath（v$version）');

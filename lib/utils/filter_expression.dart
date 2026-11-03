@@ -256,22 +256,27 @@ const String _audioScope =
 ///
 /// 这里不用 INTERSECT / EXCEPT 这类集合运算：SQLite 不接受把括号里的
 /// 复合查询当成集合运算的操作数（`(SELECT ...) INTERSECT (SELECT ...)` 直接报
-/// 语法错），所以改成每层都从音频作用域出发做 IN / NOT IN 收窄。
-/// 规则标签同样返回一条子查询，直接当 IN 的操作数用。
-String buildTrackIdSubquery(Expr ast, TagRefResolver resolve) {
+/// 语法错），所以改成每层都从作用域出发做 IN / NOT IN 收窄。
+///
+/// [scope] 默认只允许音频；图片/多媒体筛选必须传入对应的 media 子查询，
+/// 否则规则标签与 NOT 会把结果又拉回音频。
+String buildTrackIdSubquery(
+  Expr ast,
+  TagRefResolver resolve, {
+  String? scope,
+}) {
+  final rootScope = scope ?? _audioScope;
+  String sub(Expr child) =>
+      buildTrackIdSubquery(child, resolve, scope: rootScope);
+
   if (ast is TagRef) {
     return resolve(ast);
   } else if (ast is NotExpr) {
-    return '$_audioScope AND id NOT IN '
-        '(${buildTrackIdSubquery(ast.child, resolve)})';
+    return '$rootScope AND id NOT IN (${sub(ast.child)})';
   } else if (ast is AndExpr) {
-    return '$_audioScope AND id IN '
-        '(${buildTrackIdSubquery(ast.left, resolve)}) AND id IN '
-        '(${buildTrackIdSubquery(ast.right, resolve)})';
+    return '$rootScope AND id IN (${sub(ast.left)}) AND id IN (${sub(ast.right)})';
   } else if (ast is OrExpr) {
-    return '$_audioScope AND (id IN '
-        '(${buildTrackIdSubquery(ast.left, resolve)}) OR id IN '
-        '(${buildTrackIdSubquery(ast.right, resolve)}))';
+    return '$rootScope AND (id IN (${sub(ast.left)}) OR id IN (${sub(ast.right)}))';
   }
   throw StateError('未知的表达式节点类型');
 }
