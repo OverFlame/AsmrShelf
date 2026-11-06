@@ -14,6 +14,7 @@ import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
 import '../services/dlsite/series_index.dart';
 import '../services/dlsite/work_code.dart';
+import '../services/settings_service.dart';
 import '../utils/log_util.dart';
 
 /// DLsite 元数据状态：从作品目录名认出编号、抓取、预览、应用。
@@ -93,7 +94,13 @@ class DlsiteState extends ChangeNotifier {
   /// 重建系列索引。元数据落库后与启动时调用。
   Future<void> loadSeriesIndex() async {
     final rows = await WorkMetadataDao(db()).listAll();
-    _seriesIndex = DlsiteSeriesIndex.fromMetadata(rows);
+    final works = await workDao().listAll();
+    _seriesIndex = DlsiteSeriesIndex.fromMetadata(
+      rows,
+      manual: SettingsService.instance.manualSeries,
+      workNames: {for (final work in works) work.id!: work.name},
+      validWorkIds: {for (final work in works) work.id!},
+    );
     notifyListeners();
   }
 

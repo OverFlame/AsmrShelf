@@ -262,6 +262,59 @@ void main() {
     expect(app.selectedWorkIds, isEmpty, reason: '再点一次取消整组');
   });
 
+  testWidgets('多选作品可以创建、重命名和解散手动系列', (tester) async {
+    late int a;
+    late int b;
+    await tester.runAsync(() async {
+      a = (await WorkDao(db).create('手动一', library: 'audio')).id!;
+      b = (await WorkDao(db).create('手动二', library: 'audio')).id!;
+      await app.refresh();
+    });
+    wideScreen(tester);
+    await pumpHome(tester);
+
+    await tester.longPress(find.byKey(ValueKey('work-card-$a')));
+    await settleIo(tester);
+    await tester.tap(find.byKey(ValueKey('work-card-$b')));
+    await settleIo(tester);
+    expect(app.selectedWorkIds, {a, b});
+
+    await tester.tap(find.byKey(const ValueKey('work-batch-series')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('series-name-input')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('series-name-input')),
+      '我的手动系列',
+    );
+    await tester.tap(find.byKey(const ValueKey('series-name-confirm')));
+    await settleIo(tester);
+
+    expect(app.currentSeries?.manual, isTrue);
+    expect(app.currentSeries?.name, '我的手动系列');
+    expect(app.currentSeries?.workIds, [a, b]);
+
+    await tester.tap(find.byKey(const ValueKey('series-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重命名系列'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('series-name-input')),
+      '改名后的系列',
+    );
+    await tester.tap(find.byKey(const ValueKey('series-name-confirm')));
+    await settleIo(tester);
+    expect(app.currentSeries?.name, '改名后的系列');
+
+    await tester.tap(find.byKey(const ValueKey('series-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('解散系列'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('确定'));
+    await settleIo(tester);
+    expect(app.currentSeries, isNull);
+    expect(app.seriesGroups, isEmpty);
+  });
+
   testWidgets('作品卡片菜单能添加/移除标签（作用于整个作品）', (tester) async {
     wideScreen(tester);
     await pumpHome(tester);

@@ -9,6 +9,7 @@ import 'package:asmrshelf/db/database.dart';
 import 'package:asmrshelf/db/folder_dao.dart';
 import 'package:asmrshelf/db/work_dao.dart';
 import 'package:asmrshelf/services/data_dir_service.dart';
+import 'package:asmrshelf/services/settings_service.dart';
 import 'package:asmrshelf/state/app_state.dart';
 import 'package:asmrshelf/state/player_controller.dart';
 import '../support/test_env.dart';
@@ -79,6 +80,28 @@ void main() {
   Future<void> settleRefresh() async {
     await state.refresh();
   }
+
+  test('可以创建、重命名和解散手动系列', () async {
+    SettingsService.instance.resetForTest();
+    final a = await seedWork('手动系列 A');
+    final b = await seedWork('手动系列 B');
+    await state.refresh();
+
+    final created = await state.createManualSeries([a, b], name: '我的手動系列');
+    expect(created, isNotNull);
+    expect(created!.manual, isTrue);
+    expect(created.name, '我的手動系列');
+    expect(created.workIds, [a, b]);
+    expect(state.seriesGroups.single.key, created.key);
+
+    await state.renameManualSeries(created.key, '改名后的系列');
+    final renamed = state.seriesGroups.single;
+    expect(renamed.name, '改名后的系列');
+
+    await state.deleteManualSeries(renamed.key);
+    expect(state.seriesGroups, isEmpty);
+    expect(SettingsService.instance.manualSeries, isEmpty);
+  });
 
   test('进入旧版一次性导入的作品时补齐子文件夹树', () async {
     final id = await seedLegacyNestedWork('旧作品');

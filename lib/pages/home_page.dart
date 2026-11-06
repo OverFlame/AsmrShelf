@@ -296,6 +296,84 @@ class _HomePageState extends State<HomePage> {
 }
 
 /// 系列页顶部：返回全部作品 + 系列名 + 已导入/总数。
+class _SeriesNameDialog extends StatefulWidget {
+  const _SeriesNameDialog({
+    required this.title,
+    required this.confirmLabel,
+    this.initial = '',
+  });
+
+  final String title;
+  final String confirmLabel;
+  final String initial;
+
+  @override
+  State<_SeriesNameDialog> createState() => _SeriesNameDialogState();
+}
+
+class _SeriesNameDialogState extends State<_SeriesNameDialog> {
+  late final TextEditingController _controller;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = '系列名不能为空');
+      return;
+    }
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 320,
+        child: TextField(
+          key: const ValueKey('series-name-input'),
+          controller: _controller,
+          autofocus: true,
+          maxLength: 40,
+          decoration: InputDecoration(
+            labelText: '系列名称',
+            hintText: '例如：母亲失格',
+            errorText: _error,
+          ),
+          onChanged: (_) {
+            if (_error != null) setState(() => _error = null);
+          },
+          onSubmitted: (_) => _submit(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          key: const ValueKey('series-name-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const ValueKey('series-name-confirm'),
+          onPressed: _submit,
+          child: Text(widget.confirmLabel),
+        ),
+      ],
+    );
+  }
+}
+
 class _SeriesBar extends StatelessWidget {
   const _SeriesBar({required this.appState, required this.series});
 
@@ -334,10 +412,71 @@ class _SeriesBar extends StatelessWidget {
             key: const ValueKey('series-count'),
             style: TextStyle(color: AppColors.mutedOf(context), fontSize: 12),
           ),
+          if (series.manual)
+            PopupMenuButton<String>(
+              key: const ValueKey('series-menu'),
+              tooltip: '系列操作',
+              onSelected: (value) {
+                if (value == 'rename') {
+                  _rename(context);
+                } else if (value == 'delete') {
+                  _delete(context);
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'rename', child: Text('重命名系列')),
+                PopupMenuItem(value: 'delete', child: Text('解散系列')),
+              ],
+            ),
           const SizedBox(width: 12),
         ],
       ),
     );
+  }
+
+  Future<void> _rename(BuildContext context) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _SeriesNameDialog(
+        title: '重命名系列',
+        confirmLabel: '保存',
+        initial: series.name,
+      ),
+    );
+    if (name == null || !context.mounted) return;
+    try {
+      await appState.renameManualSeries(series.key, name);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已重命名为「$name」')),
+      );
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final ok = await confirmDialog(
+      context,
+      title: '解散「${series.name}」？',
+      content: '只删除手动分组，不会删除作品或磁盘文件。',
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await appState.deleteManualSeries(series.key);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('系列已解散')),
+      );
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 }
 
@@ -823,6 +962,12 @@ class _WorkSelectionToolbar extends StatelessWidget {
                   ? null
                   : () => _batchTags(context, add: false),
             ),
+            IconButton(
+              key: const ValueKey('work-batch-series'),
+              tooltip: '创建手动系列',
+              icon: const Icon(Icons.auto_stories_outlined, size: 18),
+              onPressed: count < 2 ? null : () => _batchCreateSeries(context),
+            ),
             const SizedBox(width: 4),
             IconButton(
               key: const ValueKey('work-batch-delete'),
@@ -835,6 +980,30 @@ class _WorkSelectionToolbar extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _batchCreateSeries(BuildContext context) async {
+    final ids = List<int>.from(appState.selectedWorkIds);
+    if (ids.length < 2) return;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _SeriesNameDialog(
+        title: '创建系列',
+        confirmLabel: '创建',
+      ),
+    );
+    if (name == null || !context.mounted) return;
+    try {
+      final series = await appState.createManualSeries(ids, name: name);
+      if (!context.mounted) return;
+      appState.clearWorkSelection();
+      if (series != null) await appState.enterSeries(series);
+    } on StateError catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
   }
 
   Future<void> _batchDelete(BuildContext context) async {

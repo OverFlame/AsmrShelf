@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../utils/file_io.dart';
 import '../utils/log_util.dart';
 import 'data_dir_service.dart';
+import 'dlsite/manual_series.dart';
 import 'subtitle_style.dart';
 
 /// 持久化设置服务（JSON 文件，位于数据目录 settings.json）。
@@ -169,6 +170,29 @@ class SettingsService {
 
   Future<void> setWorksSortDescending(bool desc) async {
     _data['works_sort_desc'] = desc;
+    await _save();
+  }
+
+  // ── 手动系列 ──
+
+  /// 用户手动建的系列。坏掉的条目直接跳过，不让一份坏配置拖垮启动。
+  List<ManualSeries> get manualSeries {
+    final raw = _data['manual_series'];
+    if (raw is! List) return const [];
+    final result = <ManualSeries>[];
+    for (final item in raw) {
+      final series = ManualSeries.tryFromJson(item);
+      if (series != null) result.add(series);
+    }
+    return result;
+  }
+
+  Future<void> setManualSeries(List<ManualSeries> series) async {
+    if (series.isEmpty) {
+      _data.remove('manual_series');
+    } else {
+      _data['manual_series'] = [for (final item in series) item.toJson()];
+    }
     await _save();
   }
 

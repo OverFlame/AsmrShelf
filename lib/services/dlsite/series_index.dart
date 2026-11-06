@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../../db/work_metadata_dao.dart';
+import 'manual_series.dart';
 
 /// 一个已导入至少两部的系列（界面上的「大作品」）。
 class DlsiteSeries {
@@ -10,6 +11,7 @@ class DlsiteSeries {
     required this.workIds,
     this.id,
     this.total,
+    this.manual = false,
   });
 
   /// 分组键：优先 `id:<series_id>`，没有编号时退回 `name:<circle>:<系列名>`。
@@ -23,6 +25,9 @@ class DlsiteSeries {
 
   /// 接口给的系列总数（`title_work_count`），可能为 null。
   final int? total;
+
+  /// 是否是用户手动建的系列；手动系列优先于元数据派生。
+  final bool manual;
 
   /// 已导入的作品 id，按元数据行顺序；展示排序由调用方决定。
   final List<int> workIds;
@@ -53,16 +58,50 @@ class DlsiteSeriesIndex {
 
   DlsiteSeries? seriesFor(int workId) => byWorkId[workId];
 
-  factory DlsiteSeriesIndex.fromMetadata(List<WorkMetadata> rows) {
+  factory DlsiteSeriesIndex.fromMetadata(
+    List<WorkMetadata> rows, {
+    List<ManualSeries> manual = const [],
+    Map<int, String>? workNames,
+    Set<int>? validWorkIds,
+  }) {
+    final groups = <DlsiteSeries>[];
+    final byWorkId = <int, DlsiteSeries>{};
+    final claimed = <int>{};
+
+    // 手动系列优先：同一部作品只能属于一个手动系列；先占住 id，派生系列
+    // 就跳过这些作品，避免一个作品同时出现在两个书套里。
+    for (final item in manual) {
+      final ids = <int>[];
+      for (final id in item.workIds) {
+        if (validWorkIds != null && !validWorkIds.contains(id)) continue;
+        if (claimed.contains(id) || ids.contains(id)) continue;
+        ids.add(id);
+      }
+      if (ids.length < 2) continue;
+      final series = DlsiteSeries(
+        key: 'manual:${item.id}',
+        name: item.name,
+        manual: true,
+        workIds: List<int>.unmodifiable(ids),
+      );
+      groups.add(series);
+      claimed.addAll(ids);
+      for (final id in ids) {
+        byWorkId[id] = series;
+      }
+    }
+
     final members = <String, List<_SeriesMember>>{};
     for (final row in rows) {
-      final member = _SeriesMember.fromMetadata(row);
+      if (claimed.contains(row.workId)) continue;
+      final member = _SeriesMember.fromMetadata(
+        row,
+        workTitle: workNames?[row.workId],
+      );
       if (member == null) continue;
       members.putIfAbsent(member.key, () => []).add(member);
     }
 
-    final groups = <DlsiteSeries>[];
-    final byWorkId = <int, DlsiteSeries>{};
     for (final entry in members.entries) {
       final list = entry.value;
       if (list.length < 2) continue;
@@ -104,7 +143,7 @@ class _SeriesMember {
   final String? id;
   final int? total;
 
-  static _SeriesMember? fromMetadata(WorkMetadata row) {
+  static _SeriesMember? fromMetadata(WorkMetadata row, {String? workTitle}) {
     final data = _firstJsonObject(row.rawJson);
     final id = _text(data?['series_id']);
     final rawName = _text(data?['series_name']);
@@ -118,13 +157,21 @@ class _SeriesMember {
     } else if (name != null && circle != null && circle.isNotEmpty) {
       // 没有系列编号时才按「社团 + 系列名」回退；缺社团不猜，避免跨社团误并。
       key = 'name:$circle:$name';
+    } else if (name == null) {
+      // 最后才从标题里找系列：同人社团经常跨社团出同一系列，且 DLsite
+      // 的商品 JSON 不一定给 series_id。只接受高置信度的标题形态。
+      // 有系列名但缺社团时仍不猜，保持原来的保守口径。
+      final titleName = _seriesNameFromTitle(workTitle ?? row.title);
+      if (titleName != null) {
+        key = 'title:${titleName.toLowerCase()}';
+      }
     }
     if (key == null) return null;
 
     return _SeriesMember(
       workId: row.workId,
       key: key,
-      name: name ?? '系列 $id',
+      name: name ?? _seriesNameFromTitle(workTitle ?? row.title) ?? '系列 $id',
       id: id,
       total: _asInt(data?['title_work_count']),
     );
@@ -159,3 +206,58 @@ int? _asInt(Object? value) => switch (value) {
       final String s => int.tryParse(s),
       _ => null,
     };
+
+/// 商品标题里常见的版本标签，不属于系列名。
+const _editionTags = {
+  '简体中文版',
+  '繁体中文版',
+  '簡体中文版',
+  '繁體中文版',
+  '中文版',
+  '中文字幕',
+  '中字',
+  '日配中字',
+  '日配中文字幕',
+};
+
+/// 从标题里推断系列名。
+///
+/// 只认三种形态，宁可少合并也不跨作品误并：
+/// 1. `【简体中文版】【巫女NTR】...`：剥掉版本标签后，取开头带
+///    「系列 / シリーズ / NTR」的方括号标签；
+/// 2. `【简体中文版】母亲失格～...`：取 `～` / `~` 前长度至少 4 的前缀；
+/// 3. 没有可识别标签时返回 null。
+String? _seriesNameFromTitle(String? raw) {
+  if (raw == null) return null;
+  var title = raw.trim();
+  if (title.isEmpty) return null;
+
+  while (true) {
+    final match = RegExp(r'^【([^】]+)】').firstMatch(title);
+    if (match == null) break;
+    final label = match.group(1)!.trim();
+    if (!_editionTags.contains(label)) break;
+    title = title.substring(match.end).trimLeft();
+  }
+
+  final bracket = RegExp(r'^【([^】]{2,30})】').firstMatch(title);
+  if (bracket != null) {
+    final label = bracket.group(1)!.trim();
+    final lower = label.toLowerCase();
+    if (lower.contains('系列') ||
+        lower.contains('シリーズ') ||
+        lower.contains('ntr')) {
+      return label;
+    }
+  }
+
+  for (final separator in const ['～', '~']) {
+    final index = title.indexOf(separator);
+    if (index <= 0) continue;
+    final prefix = title.substring(0, index).trim();
+    if (prefix.length < 4 || prefix.length > 40) continue;
+    if (prefix.startsWith('【') || _editionTags.contains(prefix)) continue;
+    return prefix;
+  }
+  return null;
+}

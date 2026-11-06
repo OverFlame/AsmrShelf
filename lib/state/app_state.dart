@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 // RepeatMode 与 Flutter 的同名枚举冲突，隐藏框架那个
 import 'package:flutter/material.dart' hide RepeatMode;
@@ -22,6 +23,7 @@ import '../services/dlsite/dlsite_api.dart';
 import '../services/dlsite/dlsite_cover.dart';
 import '../services/dlsite/dlsite_models.dart';
 import '../services/dlsite/dlsite_repository.dart';
+import '../services/dlsite/manual_series.dart';
 import '../services/dlsite/series_index.dart';
 import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
@@ -894,6 +896,93 @@ class AppState extends ChangeNotifier {
   Future<void> enterSeries(DlsiteSeries series) async {
     library.showSeries(series);
     await refresh();
+  }
+
+  /// 手动把若干作品圈成一个系列。返回刷新后的系列；少于 2 部时报错。
+  Future<DlsiteSeries?> createManualSeries(
+    Iterable<int> workIds, {
+    required String name,
+  }) async {
+    final cleanName = name.trim();
+    if (cleanName.isEmpty) throw StateError('系列名不能为空');
+    final ids = <int>[];
+    for (final id in workIds) {
+      if (!ids.contains(id)) ids.add(id);
+    }
+    if (ids.length < 2) throw StateError('至少选 2 部作品才能建系列');
+
+    final existing = SettingsService.instance.manualSeries;
+    for (final item in existing) {
+      if (item.name.toLowerCase() == cleanName.toLowerCase()) {
+        throw StateError('已经有同名系列了');
+      }
+    }
+
+    // 一部作品只能属于一个手动系列：从其它系列里摘掉这些 id。
+    final next = <ManualSeries>[];
+    for (final item in existing) {
+      final kept = item.workIds.where((id) => !ids.contains(id)).toList();
+      if (kept.length >= 2) {
+        next.add(ManualSeries(id: item.id, name: item.name, workIds: kept));
+      }
+    }
+    final id = 'm${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+        '${math.Random().nextInt(1296).toRadixString(36).padLeft(2, '0')}';
+    next.add(ManualSeries(id: id, name: cleanName, workIds: ids));
+    await SettingsService.instance.setManualSeries(next);
+    await dlsite.loadSeriesIndex();
+    return _seriesByKey('manual:$id');
+  }
+
+  /// 重命名手动系列；自动系列不能改。
+  Future<void> renameManualSeries(String key, String name) async {
+    final cleanName = name.trim();
+    if (cleanName.isEmpty) throw StateError('系列名不能为空');
+    final id = key.startsWith('manual:') ? key.substring('manual:'.length) : null;
+    if (id == null) throw StateError('只有手动创建的系列才能重命名');
+
+    final existing = SettingsService.instance.manualSeries;
+    if (!existing.any((item) => item.id == id)) {
+      throw StateError('系列不存在，可能已被删除');
+    }
+    for (final item in existing) {
+      if (item.id != id && item.name.toLowerCase() == cleanName.toLowerCase()) {
+        throw StateError('已经有同名系列了');
+      }
+    }
+
+    await SettingsService.instance.setManualSeries([
+      for (final item in existing)
+        item.id == id
+            ? ManualSeries(id: item.id, name: cleanName, workIds: item.workIds)
+            : item,
+    ]);
+    await dlsite.loadSeriesIndex();
+    final updated = _seriesByKey(key);
+    if (updated != null && library.currentSeries?.key == key) {
+      library.showSeries(updated);
+      await refresh();
+    }
+  }
+
+  /// 解散手动系列；作品回到普通卡片或自动系列。
+  Future<void> deleteManualSeries(String key) async {
+    final id = key.startsWith('manual:') ? key.substring('manual:'.length) : null;
+    if (id == null) throw StateError('只有手动创建的系列才能解散');
+    final existing = SettingsService.instance.manualSeries;
+    await SettingsService.instance.setManualSeries([
+      for (final item in existing)
+        if (item.id != id) item,
+    ]);
+    await dlsite.loadSeriesIndex();
+    if (library.currentSeries?.key == key) await goHome();
+  }
+
+  DlsiteSeries? _seriesByKey(String key) {
+    for (final series in dlsite.seriesIndex.groups) {
+      if (series.key == key) return series;
+    }
+    return null;
   }
 
   Future<void> enterFolder(int folderId) async {
