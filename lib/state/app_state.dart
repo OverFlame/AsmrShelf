@@ -27,6 +27,7 @@ import '../services/dlsite/manual_series.dart';
 import '../services/dlsite/series_index.dart';
 import '../services/dlsite/work_code.dart';
 import '../services/import_service.dart';
+import '../services/metadata_service.dart';
 import '../services/plan_importer.dart';
 import '../services/playlist_writer.dart';
 import '../services/segment_service.dart';
@@ -359,6 +360,7 @@ class AppState extends ChangeNotifier {
   // ── 字幕缓存 ──
   final Map<String, SubtitleDocument> _subtitleCache = {};
   final Set<String> _subtitleRepairTried = <String>{};
+  final Set<String> _durationRepairTried = <String>{};
 
   // ═══════════════ DAO 便捷访问 ═══════════════
 
@@ -812,6 +814,8 @@ class AppState extends ChangeNotifier {
     await _repairWorkFolderTree(work);
     // 旧版一次性导入也没有扫描同名字幕；进入时补一次，避免用户重导整个库。
     await _repairWorkSubtitles(work);
+    // 一次性导入没有读音频时长；补齐后曲目行才能显示「已播 / 总时长」。
+    await _repairWorkDurations(work);
     // 从系列页进的，面包屑保留系列；从首页进的就没有系列节点。
     library.showWork(work, series: library.currentSeries);
     // 元数据先装进内存，详情头同步读，省一次闪烁。
@@ -889,6 +893,35 @@ class AppState extends ChangeNotifier {
     }
     if (repaired > 0) {
       logInfo('AppState', '补齐作品字幕: ${work.name} ($repaired 首)');
+    }
+  }
+
+  /// 一次性导入只写路径，没有读取音频时长；首次进入作品时补一次。
+  /// 正常导入已经带 duration_ms，这里只会多一次空列表查询。
+  Future<void> _repairWorkDurations(Work work) async {
+    final rootPath = work.rootPath;
+    if (rootPath == null || rootPath.trim().isEmpty) return;
+    final key = rootPath.toLowerCase();
+    if (!_durationRepairTried.add(key)) return;
+
+    final tracks = await _trackDao.queryByDirs([rootPath]);
+    final missing = tracks
+        .where((t) =>
+            t.id != null && (t.durationMs == null || t.durationMs! <= 0))
+        .toList();
+    if (missing.isEmpty) return;
+
+    final durations =
+        await MetadataService.readDurations(missing.map((t) => t.path).toList());
+    var repaired = 0;
+    for (var i = 0; i < missing.length; i++) {
+      final ms = durations[i];
+      if (ms == null || ms <= 0) continue;
+      await _trackDao.setDuration(missing[i].id!, ms);
+      repaired++;
+    }
+    if (repaired > 0) {
+      logInfo('AppState', '补齐作品时长: ${work.name} ($repaired 首)');
     }
   }
 

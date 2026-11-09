@@ -930,6 +930,11 @@ class _FolderTile extends StatelessWidget {
   }
 }
 
+String _durationLabel(int? ms) {
+  if (ms == null || ms <= 0) return '--:--';
+  return formatDuration(Duration(milliseconds: ms));
+}
+
 class _TrackTile extends StatelessWidget {
   final TrackItem track;
   final int index;
@@ -1049,16 +1054,17 @@ class _TrackTile extends StatelessWidget {
                 padding: EdgeInsets.only(right: 6),
                 child: Icon(Icons.subtitles, size: 15, color: AppColors.teal),
               ),
-            if (track.durationMs != null)
-              Text(
-                // 已播时间 / 总时长：没播过的显示 0:00，播过的能一眼看出听到哪里
-                '${formatDuration(Duration(milliseconds: track.playPositionMs))}'
-                ' / ${formatDuration(Duration(milliseconds: track.durationMs!))}',
-                style: TextStyle(
-                  color: AppColors.mutedLightOf(context),
-                  fontSize: 12,
-                ),
+            Text(
+              // 已播时间 / 总时长：时长还没探测出来时用 --:-- 占位，
+              // 补全后会随列表刷新。
+              '${formatDuration(Duration(milliseconds: track.playPositionMs))}'
+              ' / ${_durationLabel(track.durationMs)}',
+              key: ValueKey('track-time-${track.id ?? track.path}'),
+              style: TextStyle(
+                color: AppColors.mutedLightOf(context),
+                fontSize: 12,
               ),
+            ),
             PopupMenuButton<String>(
               icon: Icon(
                 Icons.more_vert,

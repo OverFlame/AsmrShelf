@@ -148,6 +148,14 @@ class TrackDao {
     logDebug('TrackDao', 'setSubtitlePath id=$id -> $path');
   }
 
+  Future<void> setDuration(int id, int durationMs) async {
+    await _mediaDao.updateRow(
+      id,
+      {'duration_ms': durationMs},
+      type: MediaType.audio,
+    );
+  }
+
   Future<void> setCoverPath(int id, String? path) async {
     await _mediaDao.setCoverPath(id, path);
     logDebug('TrackDao', 'setCoverPath id=$id -> $path');

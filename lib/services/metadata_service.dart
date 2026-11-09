@@ -68,6 +68,32 @@ class MetadataService {
     return compute(_readAllSync, paths, debugLabel: 'asmrshelf.metadata');
   }
 
+  /// 只读取时长，不解码封面。用于补齐一次性导入漏掉的 `duration_ms`。
+  ///
+  /// 返回值与 [paths] 一一对应；读不到时对应项为 null。
+  static Future<List<int?>> readDurations(List<String> paths) {
+    if (paths.isEmpty) return Future.value(const <int?>[]);
+    return compute(_readDurationsSync, paths,
+        debugLabel: 'asmrshelf.durations');
+  }
+
+  static List<int?> _readDurationsSync(List<String> paths) {
+    return paths.map(_readDurationSync).toList();
+  }
+
+  static int? _readDurationSync(String path) {
+    try {
+      final f = File(path);
+      if (!f.existsSync()) return null;
+      final m = readMetadata(f, getImage: false);
+      final ms = m.duration?.inMilliseconds;
+      return ms != null && ms > 0 ? ms : null;
+    } catch (e) {
+      logDebug('Metadata', '读取时长失败 $path: $e');
+      return null;
+    }
+  }
+
   /// 测试用：判断 [_readAllSync] 是否跑在调用方 isolate 上。
   ///
   /// 每个 isolate 有自己的静态变量，解析跑到别的 isolate 时这里的值不变。

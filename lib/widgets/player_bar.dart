@@ -36,6 +36,12 @@ class PlayerBar extends StatelessWidget {
     final maxMs = player.duration.inMilliseconds;
     final posMs =
         player.position.inMilliseconds.clamp(0, maxMs > 0 ? maxMs : 0);
+    // 引擎还没量出长度时，用曲目入库时探测到的时长兜底，避免显示 0:00。
+    final knownDurationMs =
+        maxMs > 0 ? maxMs : (track.durationMs ?? 0);
+    final durationLabel = knownDurationMs > 0
+        ? formatDuration(Duration(milliseconds: knownDurationMs))
+        : '--:--';
     final cover = appState.coverForTrack(track);
 
     return Container(
@@ -101,7 +107,8 @@ class PlayerBar extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '${formatDuration(player.position)} / ${formatDuration(player.duration)}',
+                    '${formatDuration(player.position)} / $durationLabel',
+                    key: const ValueKey('player-time'),
                     style: TextStyle(
                         color: AppColors.mutedLightOf(context), fontSize: 11),
                   ),
