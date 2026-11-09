@@ -118,6 +118,27 @@ void main() {
     expect(index.groups.single.workIds, [2, 6]);
   });
 
+  test('引用语后的「冷淡妈妈」标题也能跨社团合并', () {
+    final index = DlsiteSeriesIndex.fromMetadata(
+      [
+        _meta(68, circle: 'J○大好き',
+            title: '【简体中文版】【耳边紧贴】能做除无套内射外任何事的「只有表面清纯」的冷淡妈妈和你的尽情乱伦性活'),
+        _meta(70, circle: 'J○大好き',
+            title: '【简体中文版】【耳旁紧贴】理解儿子的宠溺M性癖的「只有表面清纯」的冷淡妈妈和你的疯狂近亲相奸性活'),
+        _meta(74, circle: '虚無の刃',
+            title: '【简体中文版】【紧贴耳边】与除了无套插入以外什么都愿意做、「只有外表看似清纯」的冷淡妈妈疯狂近亲相〇的性生活2'),
+      ],
+      workNames: {
+        68: '【简体中文版】【耳边紧贴】能做除无套内射外任何事的「只有表面清纯」的冷淡妈妈和你的尽情乱伦性活',
+        70: '【简体中文版】【耳旁紧贴】理解儿子的宠溺M性癖的「只有表面清纯」的冷淡妈妈和你的疯狂近亲相奸性活',
+        74: '【简体中文版】【紧贴耳边】与除了无套插入以外什么都愿意做、「只有外表看似清纯」的冷淡妈妈疯狂近亲相〇的性生活2',
+      },
+    );
+    expect(index.groups, hasLength(1));
+    expect(index.groups.single.name, '冷淡妈妈');
+    expect(index.groups.single.workIds, [68, 70, 74]);
+  });
+
   test('手动系列优先于自动系列，并且只保留有效作品', () {
     final index = DlsiteSeriesIndex.fromMetadata(
       [

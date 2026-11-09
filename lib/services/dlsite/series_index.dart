@@ -259,5 +259,17 @@ String? _seriesNameFromTitle(String? raw) {
     if (prefix.startsWith('【') || _editionTags.contains(prefix)) continue;
     return prefix;
   }
+
+  // 4. `「只有表面清纯」的冷淡妈妈...`：引用语后面的名词短语。
+  //    同一系列常用不同引用语（“表面清纯”/“外表看似清纯”），但后面的
+  //    人物/关系描述相同；这里取「」” 后、第一个停顿词前的 2–8 个汉字。
+  final quoted = RegExp(
+    r'[」”"]\s*的?\s*([\u4e00-\u9fff]{2,8}?)(?=和|与|跟|及|在|被|把|让|为|是|有|疯狂|尽情|一起|的|，|。|、|～|~|\d|$)',
+  ).firstMatch(title);
+  if (quoted != null) {
+    final phrase = quoted.group(1)!.trim();
+    if (phrase.length >= 2) return phrase;
+  }
+
   return null;
 }
