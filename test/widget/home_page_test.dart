@@ -174,6 +174,31 @@ void main() {
     expect(find.byType(FolderBrowser), findsNothing);
   });
 
+  testWidgets('主页自动滚到上一次打开的作品', (tester) async {
+    wideScreen(tester);
+    await tester.runAsync(() async {
+      for (var i = 0; i < 20; i++) {
+        await WorkDao(db).create('作品$i', library: 'audio');
+      }
+      await app.refresh();
+      await SettingsService.instance.setLastOpenedWorkId(audioWorkId);
+      await app.loadSettings();
+    });
+    await pumpHome(tester);
+    await tester.pumpAndSettle();
+
+    final scrollable = tester.state<ScrollableState>(
+      find
+          .descendant(
+            of: find.byType(WorksGrid),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(scrollable.position.pixels, greaterThan(0),
+        reason: '上次打开的作品在列表末尾，主页应自动滚过去');
+  });
+
   testWidgets('点作品卡片进入作品，文件夹浏览接管中心区', (tester) async {
     wideScreen(tester);
     await pumpHome(tester);

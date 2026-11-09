@@ -517,6 +517,19 @@ class SettingsService {
     await _save();
   }
 
+  /// 上一次进入的作品 id；主页用它把网格滚回上次打开的位置。
+  int? get lastOpenedWorkId =>
+      (_data['last_opened_work_id'] as num?)?.toInt();
+
+  Future<void> setLastOpenedWorkId(int? id) async {
+    if (id == null) {
+      _data.remove('last_opened_work_id');
+    } else {
+      _data['last_opened_work_id'] = id;
+    }
+    await _save();
+  }
+
   /// 是否把当前字幕放到系统级常驻窗口（桌面歌词 / Android 悬浮字幕）。
   bool get subtitleOverlayEnabled =>
       (_data['subtitle_overlay_enabled'] as bool?) ?? false;

@@ -246,6 +246,11 @@ class AppState extends ChangeNotifier {
 
   bool get worksSortDescending => settings.worksSortDescending;
 
+  int? _lastOpenedWorkId;
+
+  /// 上一次进入的作品；主页恢复时用它定位网格。
+  int? get lastOpenedWorkId => _lastOpenedWorkId;
+
   Future<void> setWorksSortKey(String key) async {
     if (!worksSortLabels.containsKey(key)) return;
     await settings.setWorksSortKey(key);
@@ -487,6 +492,7 @@ class AppState extends ChangeNotifier {
     _loadingSettings = true;
     try {
       settings.load(ss);
+      _lastOpenedWorkId = ss.lastOpenedWorkId;
       await subtitleOverlay.configure(
         enabled: settings.subtitleOverlayEnabled,
         locked: settings.subtitleOverlayLocked,
@@ -816,6 +822,8 @@ class AppState extends ChangeNotifier {
     await _repairWorkSubtitles(work);
     // 一次性导入没有读音频时长；补齐后曲目行才能显示「已播 / 总时长」。
     await _repairWorkDurations(work);
+    _lastOpenedWorkId = workId;
+    unawaited(SettingsService.instance.setLastOpenedWorkId(workId));
     // 从系列页进的，面包屑保留系列；从首页进的就没有系列节点。
     library.showWork(work, series: library.currentSeries);
     // 元数据先装进内存，详情头同步读，省一次闪烁。

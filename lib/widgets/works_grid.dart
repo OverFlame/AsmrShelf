@@ -18,15 +18,67 @@ import 'tag_picker_dialog.dart';
 /// [library] 为空与 `audio` 等价，都表示音频页。
 /// 传 `media` 时列出多媒体作品与音频作品：音频只导一次，两个页签看到的是同一份
 /// 数据，删一处另一处同步消失。
-class WorksGrid extends StatelessWidget {
+class WorksGrid extends StatefulWidget {
   final String? library;
 
-  const WorksGrid({super.key, this.library});
+  /// 回到主页时要滚到的作品 id。作品若属于系列，滚到系列卡。
+  final int? focusWorkId;
+
+  const WorksGrid({super.key, this.library, this.focusWorkId});
+
+  @override
+  State<WorksGrid> createState() => _WorksGridState();
+}
+
+class _WorksGridState extends State<WorksGrid> {
+  final ScrollController _scroll = ScrollController();
+  bool _didAutoScroll = false;
 
   /// 空值与 audio 都按音频页处理（音频页显式传 audio）。
-  String get _lib => library ?? 'audio';
+  String get _lib => widget.library ?? 'audio';
 
   bool get _isAudio => _lib == 'audio';
+
+  @override
+  void didUpdateWidget(covariant WorksGrid oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusWorkId != widget.focusWorkId) {
+      _didAutoScroll = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  int? _focusIndex(List<Object> entries) {
+    final focus = widget.focusWorkId;
+    if (focus == null) return null;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry is Work && entry.id == focus) return i;
+      if (entry is DlsiteSeries && entry.workIds.contains(focus)) return i;
+    }
+    return null;
+  }
+
+  void _autoScrollTo(double offset) {
+    if (_didAutoScroll) return;
+    _didAutoScroll = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      final target = offset.clamp(0.0, max).toDouble();
+      if (target <= 0) return;
+      _scroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
 
   /// 本页签列出的作品归属。多媒体页把音频作品也列进来。
   Set<String> get _libs =>
@@ -95,6 +147,8 @@ class WorksGrid extends StatelessWidget {
       );
     }
 
+    final focusIndex = _focusIndex(entries);
+
     Widget itemAt(int i, {bool row = false}) {
       final entry = entries[i];
       if (entry is DlsiteSeries) {
@@ -108,14 +162,20 @@ class WorksGrid extends StatelessWidget {
       return _WorkCard(
         key: ValueKey('work-card-${work.id}'),
         work: work,
-        library: library,
+        library: widget.library,
         row: row,
       );
     }
 
     if (appState.viewMode == 'list') {
+      if (focusIndex != null) {
+        // 行高固定 64 + 8 间距；先滚到目标附近，不用等懒加载把卡片建出来。
+        _autoScrollTo(16 + focusIndex * 72.0);
+      }
       return ListView.builder(
+        controller: _scroll,
         padding: const EdgeInsets.all(16),
+        itemExtent: 72,
         itemCount: entries.length,
         itemBuilder: (_, i) => Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -133,7 +193,12 @@ class WorksGrid extends StatelessWidget {
             (constraints.maxWidth - 32 - spacing * (cols - 1)) / cols;
         // 宽卡片保持 0.82；窄到放不下标题时改为固定留出文字高度，避免溢出。
         final cellHeight = cellWidth < 120 ? cellWidth + 34 : cellWidth / 0.82;
+        if (focusIndex != null) {
+          final row = focusIndex ~/ cols;
+          _autoScrollTo(16 + row * (cellHeight + spacing));
+        }
         return GridView.builder(
+          controller: _scroll,
           padding: const EdgeInsets.all(16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: cols,

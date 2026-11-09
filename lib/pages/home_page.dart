@@ -218,7 +218,13 @@ class _HomePageState extends State<HomePage> {
             !appState.workSelectionMode &&
             appState.recentTracks.isNotEmpty)
           _RecentBar(appState: appState),
-        const Expanded(child: WorksGrid(library: 'audio')),
+        Expanded(
+          child: WorksGrid(
+            library: 'audio',
+            focusWorkId:
+                series == null ? appState.lastOpenedWorkId : null,
+          ),
+        ),
       ],
     );
   }
